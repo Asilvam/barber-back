@@ -19,10 +19,17 @@ async function bootstrap() {
   });
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('Barber API')
-    .setDescription('Authentication and users API')
+    .setTitle('Barber Shop Management API')
+    .setDescription(
+      'The official API documentation for managing barber shop operations, including user authentication, barber profiles, and appointment scheduling.',
+    )
     .setVersion('1.0')
     .addBearerAuth()
+    .addTag('Auth', 'Authentication endpoints')
+    .addTag('Users', 'User management')
+    .addTag('Barbers', 'Barber profiles and availability')
+    .addTag('Appointments', 'Booking and scheduling')
+    .addTag('Barber Schedules', 'Management of barber working hours and availability') // Añadimos la nueva etiqueta
     .build();
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, swaggerDocument);

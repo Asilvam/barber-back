@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  UnauthorizedException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { OAuth2Client } from 'google-auth-library';
 import * as bcrypt from 'bcrypt';
@@ -10,6 +6,7 @@ import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private googleClient: OAuth2Client;
 
   constructor(
@@ -21,8 +18,10 @@ export class AuthService {
   }
 
   async register(name: string, email: string, password: string) {
+    this.logger.log(`Register attempt email=${email}`);
     const existing = await this.usersService.findByEmail(email);
     if (existing) {
+      this.logger.warn(`Register blocked email=${email}`);
       throw new BadRequestException('Email already in use');
     }
 
@@ -33,24 +32,30 @@ export class AuthService {
       passwordHash,
     });
 
+    this.logger.log(`Register success userId=${user.id}`);
     return this.buildAuthResponse(user);
   }
 
   async login(email: string, password: string) {
+    this.logger.log(`Login attempt email=${email}`);
     const user = await this.usersService.findByEmail(email);
     if (!user || !user.passwordHash) {
+      this.logger.warn(`Login failed email=${email}`);
       throw new UnauthorizedException('Invalid credentials');
     }
 
     if (!user.emailVerified) {
+      this.logger.warn(`Login unverified email=${email}`);
       throw new UnauthorizedException('Email not verified');
     }
 
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
+      this.logger.warn(`Login failed email=${email}`);
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    this.logger.log(`Login success userId=${user.id}`);
     return this.buildAuthResponse(user);
   }
 
@@ -58,6 +63,8 @@ export class AuthService {
     if (!credential) {
       throw new BadRequestException('Missing credential');
     }
+
+    this.logger.log('Google login attempt');
 
     const clientId = process.env.GOOGLE_CLIENT_ID ?? '';
     if (!clientId) {
@@ -70,6 +77,7 @@ export class AuthService {
     });
     const payload = ticket.getPayload();
     if (!payload || !payload.sub || !payload.email || !payload.name) {
+      this.logger.warn('Google login invalid payload');
       throw new UnauthorizedException('Invalid Google token');
     }
 
@@ -94,21 +102,15 @@ export class AuthService {
     }
 
     if (!user) {
+      this.logger.error('Google login failed to resolve user');
       throw new UnauthorizedException('Unable to create user');
     }
 
+    this.logger.log(`Google login success userId=${user.id}`);
     return this.buildAuthResponse(user);
   }
 
-  private buildAuthResponse(user: {
-    id: string;
-    name: string;
-    email: string;
-    role?: string;
-    provider?: string;
-    googleId?: string | null;
-    emailVerified?: boolean;
-  }) {
+  private buildAuthResponse(user: { id: string; name: string; email: string; role?: string; provider?: string; googleId?: string | null; emailVerified?: boolean }) {
     const payload = {
       sub: user.id,
       email: user.email,

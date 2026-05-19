@@ -3,6 +3,12 @@ import { Document } from 'mongoose';
 
 export type UserDocument = User & Document;
 
+export enum UserRole {
+  USER = 'user',
+  ADMIN = 'admin',
+  BARBER = 'barber',
+}
+
 @Schema({ timestamps: true })
 export class User {
   @Prop({ required: true })
@@ -20,10 +26,10 @@ export class User {
   @Prop({ type: String, default: null, unique: true, sparse: true })
   googleId: string | null;
 
-  @Prop({ default: 'user' })
-  role: string;
+  @Prop({ type: String, enum: UserRole, default: UserRole.USER })
+  role: UserRole;
 
-  @Prop({ default: true })
+  @Prop({ default: false })
   emailVerified: boolean;
 }
 
