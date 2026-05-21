@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
 import { BarberSchedulesService } from './barber-schedules.service';
 import { CreateBarberScheduleDto } from './dto/create-barber-schedule.dto';
 import { UpdateBarberScheduleDto } from './dto/update-barber-schedule.dto';
@@ -35,10 +35,10 @@ export class BarberSchedulesController {
     return this.barberSchedulesService.findOne(id);
   }
 
-  @Get('barber/:barberId/date/:date')
-  @ApiOperation({ summary: 'Obtener horario de un barbero para una fecha específica' })
-  findByBarberAndDate(@Param('barberId') barberId: string, @Param('date') date: string) {
-    return this.barberSchedulesService.findByBarberAndDate(barberId, date);
+  @Get('availability')
+  @ApiOperation({ summary: 'Obtener disponibilidad de todos los barberos para un rango de fechas' })
+  async getAvailability(@Query('start') start: string, @Query('end') end: string) {
+    return this.barberSchedulesService.getAvailability(start, end);
   }
 
   @Patch(':id')
