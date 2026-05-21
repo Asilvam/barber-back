@@ -1,20 +1,13 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { Barber } from '../../barbers/entities/barber.schema';
+import { User } from '../../users/schemas/user.schema';
 
 @Schema({ timestamps: true }) // Genera automáticamente los campos createdAt y updatedAt
-export class Appointment extends Document {
-  // Nombre del cliente obtenido del token de autenticación
-  @Prop({ required: true, trim: true })
-  clientName: string;
-
-  // Email del cliente para notificaciones
-  @Prop({ required: true, lowercase: true, trim: true })
-  clientEmail: string;
-
-  // Teléfono móvil para contactos rápidos
-  @Prop({ required: true, trim: true })
-  clientPhone: string;
+export class Appointment {
+  // Relación con el Cliente (Usuario que hace la reserva)
+  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  clientId: Types.ObjectId | User;
 
   // Fecha guardada como String 'YYYY-MM-DD' para evitar problemas de zonas horarias en el front
   @Prop({ required: true, type: String })
@@ -23,10 +16,6 @@ export class Appointment extends Document {
   // El bloque horario seleccionado (ej: "12:00", "14:00", "19:00")
   @Prop({ required: true, type: String })
   timeSlot: string;
-
-  // Servicio solicitado en la barbería (ej: "Corte + Barba")
-  @Prop({ required: true, trim: true })
-  service: string;
 
   // Relación con el Barbero seleccionado
   @Prop({ type: Types.ObjectId, ref: 'Barber', required: true })
@@ -41,10 +30,11 @@ export class Appointment extends Document {
   status: string;
 
   // Comentarios o peticiones especiales del cliente
-  @Prop({ trim: true })
-  notes?: string;
+  // @Prop({ trim: true })
+  // notes?: string; // Eliminado
 }
 
+export type AppointmentDocument = Appointment & Document;
 export const AppointmentSchema = SchemaFactory.createForClass(Appointment);
 
 // Restricción única a nivel de Base de Datos:

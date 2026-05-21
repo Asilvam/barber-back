@@ -1,15 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsBoolean,
-  IsDateString,
-  IsMongoId,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  Matches,
-  ValidateNested,
-  IsArray,
-} from 'class-validator';
+import { IsBoolean, IsDateString, IsMongoId, IsNotEmpty, IsOptional, IsString, Matches, ValidateNested, IsArray } from 'class-validator';
 import { Type } from 'class-transformer';
 
 class TimeSlotDto {

@@ -20,9 +20,7 @@ async function bootstrap() {
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Barber Shop Management API')
-    .setDescription(
-      'The official API documentation for managing barber shop operations, including user authentication, barber profiles, and appointment scheduling.',
-    )
+    .setDescription('The official API documentation for managing barber shop operations, including user authentication, barber profiles, and appointment scheduling.')
     .setVersion('1.0')
     .addBearerAuth()
     .addTag('Auth', 'Authentication endpoints')

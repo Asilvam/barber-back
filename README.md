@@ -29,7 +29,7 @@ Create a `.env` in the project root:
 ```env
 MONGODB_URI=mongodb://localhost:27017/barber
 GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
+GOOGLE_CLIENT_SECRET=your_google_client_id
 JWT_SECRET=change_me
 JWT_EXPIRES_IN=1d
 CORS_ORIGIN=*
@@ -74,7 +74,7 @@ Request:
 
 #### Response (all auth endpoints)
 ```json
-{ "token": "<jwt>", "user": { "id": "...", "email": "...", "role": "user" } }
+{ "token": "<jwt>", "user": { "userId": "...", "email": "...", "role": "user" } }
 ```
 
 ### Users (Protected - Requires JWT)
@@ -176,7 +176,14 @@ All endpoints in this section require a valid JWT in the `Authorization: Bearer 
 
 #### `POST /appointments`
 Create a new appointment.
-Request: `CreateAppointmentDto`
+Request:
+```json
+{
+  "date": "2023-11-15",
+  "timeSlot": "10:00",
+  "barberId": "60d0fe4f5e367c001f1a2b3d"
+}
+```
 Response: `Appointment`
 
 #### `GET /appointments` (Admin Only)
@@ -192,6 +199,7 @@ Response:
   "date": "YYYY-MM-DD",
   "barberId": "...",
   "availableSlots": ["HH:MM", "HH:MM", ...]
+}
 }
 ```
 

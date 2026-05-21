@@ -65,9 +65,7 @@ export class UsersService {
 
   async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
     this.logger.log(`Updating user with id: ${id}`);
-    const existingUser = await this.userModel
-      .findByIdAndUpdate(id, updateUserDto, { new: true })
-      .exec();
+    const existingUser = await this.userModel.findByIdAndUpdate(id, updateUserDto, { new: true }).exec();
     if (!existingUser) {
       throw new NotFoundException(`User with ID "${id}" not found`);
     }
