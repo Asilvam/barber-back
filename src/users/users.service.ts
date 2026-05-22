@@ -45,7 +45,7 @@ export class UsersService {
 
   setGoogleId(userId: string, googleId: string) {
     this.logger.log(`Attach googleId userId=${userId}`);
-    return this.userModel.findByIdAndUpdate(userId, { googleId, provider: 'google' }, { new: true }).exec();
+    return this.userModel.findByIdAndUpdate(userId, { googleId, provider: 'google' }, { returnDocument: 'after' }).exec();
   }
 
   // New CRUD methods for UsersController
@@ -65,7 +65,7 @@ export class UsersService {
 
   async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
     this.logger.log(`Updating user with id: ${id}`);
-    const existingUser = await this.userModel.findByIdAndUpdate(id, updateUserDto, { new: true }).exec();
+    const existingUser = await this.userModel.findByIdAndUpdate(id, updateUserDto, { returnDocument: 'after' }).exec();
     if (!existingUser) {
       throw new NotFoundException(`User with ID "${id}" not found`);
     }

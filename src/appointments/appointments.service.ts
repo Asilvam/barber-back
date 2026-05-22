@@ -173,7 +173,7 @@ export class AppointmentsService {
       this.logger.debug('No conflicts detected for updated appointment schedule.');
     }
 
-    const updatedAppointment = await this.appointmentModel.findByIdAndUpdate(id, { $set: updateAppointmentDto }, { new: true }).populate('barberId').populate('clientId').exec();
+    const updatedAppointment = await this.appointmentModel.findByIdAndUpdate(id, { $set: updateAppointmentDto }, { returnDocument: 'after' }).populate('barberId').populate('clientId').exec();
 
     if (!updatedAppointment) {
       this.logger.error(`Failed to update appointment ${id} despite finding it.`);

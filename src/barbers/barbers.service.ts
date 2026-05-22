@@ -39,7 +39,7 @@ export class BarbersService {
 
   async update(id: string, updateBarberDto: UpdateBarberDto): Promise<Barber> {
     this.logger.log(`Attempting to update barber with ID: ${id}. Data: ${JSON.stringify(updateBarberDto)}`);
-    const existingBarber = await this.barberModel.findByIdAndUpdate(id, updateBarberDto, { new: true }).exec();
+    const existingBarber = await this.barberModel.findByIdAndUpdate(id, updateBarberDto, { returnDocument: 'after' }).exec();
     if (!existingBarber) {
       this.logger.warn(`Barber with ID ${id} not found for update.`);
       throw new NotFoundException(`Barber with ID "${id}" not found`);

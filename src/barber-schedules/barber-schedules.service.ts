@@ -64,7 +64,7 @@ export class BarberSchedulesService {
       throw new BadRequestException(`Invalid ID format: ${id}`);
     }
 
-    const updatedSchedule = await this.barberScheduleModel.findByIdAndUpdate(id, updateBarberScheduleDto, { new: true }).populate('barberId').exec();
+    const updatedSchedule = await this.barberScheduleModel.findByIdAndUpdate(id, updateBarberScheduleDto, { returnDocument: 'after' }).populate('barberId').exec();
 
     if (!updatedSchedule) {
       throw new NotFoundException(`Barber schedule with ID "${id}" not found.`);
