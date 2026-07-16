@@ -17,7 +17,7 @@ export class User {
   @Prop({ required: true, unique: true, lowercase: true, trim: true })
   email: string;
 
-  @Prop({ type: String, default: null })
+  @Prop({ type: String, default: null, select: false })
   passwordHash: string | null;
 
   @Prop({ default: 'local', enum: ['local', 'google'] })
@@ -34,3 +34,17 @@ export class User {
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
+
+UserSchema.set('toJSON', {
+  transform: (_, ret: any) => {
+    delete ret.passwordHash;
+    return ret;
+  },
+});
+
+UserSchema.set('toObject', {
+  transform: (_, ret: any) => {
+    delete ret.passwordHash;
+    return ret;
+  },
+});

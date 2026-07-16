@@ -2,6 +2,11 @@
 
 NestJS backend with local and Google auth, JWT, MongoDB, and Swagger docs.
 
+## Security rollout
+
+- Backend-first security execution guide: `docs/SECURITY_PHASE0.md`
+- PRs should follow the security template in `.github/PULL_REQUEST_TEMPLATE.md`
+
 ## Features
 
 - Local auth (register/login)
@@ -30,10 +35,27 @@ Create a `.env` in the project root:
 MONGODB_URI=mongodb://localhost:27017/barber
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_id
-JWT_SECRET=change_me
+JWT_SECRET=replace_with_a_strong_secret
 JWT_EXPIRES_IN=1d
-CORS_ORIGIN=*
+CORS_ORIGIN=http://localhost:5173
 ```
+
+Notes:
+
+- `JWT_SECRET` is required and cannot be `change_me`.
+- `CORS_ORIGIN` must be an explicit origin or comma-separated allowlist (no `*`).
+
+## Security hardening
+
+- `helmet` enabled globally.
+- Global rate limit enabled (`60 req/min`), with stricter limits on auth routes:
+  - `POST /auth/register`: `5 req/min`
+  - `POST /auth/login`: `5 req/min`
+  - `POST /auth/google`: `10 req/min`
+- `passwordHash` is not selectable by default and is sanitized from serialized user objects.
+- `GET/PATCH/DELETE /users/:id` now allow only `self` or `admin`.
+- `GET /appointments/:id` now allows only appointment owner or admin.
+- Appointment create/update now maps Mongo duplicate key (`E11000`) to `409 Conflict`.
 
 ## Run
 
@@ -87,10 +109,13 @@ Response: `User[]`
 
 #### `GET /users/:id`
 Get details of a specific user.
+Access: Self or Admin.
 Response: `User`
 
 #### `PATCH /users/:id`
 Update user profile.
+Access: Self or Admin.
+Note: non-admin users cannot change `role`.
 Request: `Partial<UpdateUserDto>`
 Response: `User`
 
@@ -104,6 +129,7 @@ Response: `User`
 
 #### `DELETE /users/:id`
 Delete a user.
+Access: Self or Admin.
 Response: `User`
 
 ### Barbers (Protected - Requires JWT)
@@ -205,6 +231,7 @@ Response:
 
 #### `GET /appointments/:id`
 Get details of a specific appointment.
+Access: Appointment owner or Admin.
 Response: `Appointment`
 
 #### `PATCH /appointments/:id` (Admin Only)

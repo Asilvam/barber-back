@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Req, Logger } from '@nestjs/common'; // Importamos Logger
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Req, Logger, ForbiddenException } from '@nestjs/common'; // Importamos Logger
 import { AppointmentsService } from './appointments.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
@@ -51,11 +51,30 @@ export class AppointmentsController {
     return this.appointmentsService.getAvailableSlots(barberId, date);
   }
 
+  @Get('me/active')
+  @ApiOperation({ summary: 'Obtener la cita activa del cliente autenticado' })
+  getMyActiveAppointment(@Req() req: AuthenticatedRequest) {
+    const clientId = req.user.userId;
+    this.logger.log(`Received request to get active appointment for client ${clientId}.`);
+    return this.appointmentsService.findActiveByClient(clientId);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obtener detalle de una cita' })
-  findOne(@Param('id') id: string) {
+  async findOne(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     this.logger.log(`Received request to find appointment with ID: ${id}.`);
-    return this.appointmentsService.findOne(id);
+    const appointment = await this.appointmentsService.findOne(id);
+
+    const clientValue = (appointment as { clientId?: unknown }).clientId;
+    const clientId = this.extractClientId(clientValue);
+    const isAdmin = req.user.role === UserRole.ADMIN;
+    const isOwner = req.user.userId === clientId;
+
+    if (!isAdmin && !isOwner) {
+      throw new ForbiddenException('No tienes permisos para acceder a este recurso');
+    }
+
+    return appointment;
   }
 
   @Patch(':id')
@@ -74,5 +93,30 @@ export class AppointmentsController {
   remove(@Param('id') id: string) {
     this.logger.log(`Received request to remove appointment with ID: ${id}.`);
     return this.appointmentsService.remove(id);
+  }
+
+  private extractClientId(clientValue: unknown): string {
+    if (!clientValue) {
+      return '';
+    }
+
+    if (typeof clientValue === 'string') {
+      return clientValue;
+    }
+
+    if (typeof clientValue === 'object' && clientValue !== null) {
+      const candidate = clientValue as { _id?: unknown; toString?: () => string };
+      if (typeof candidate._id === 'string') {
+        return candidate._id;
+      }
+      if (candidate._id && typeof (candidate._id as { toString?: () => string }).toString === 'function') {
+        return (candidate._id as { toString: () => string }).toString();
+      }
+      if (typeof candidate.toString === 'function') {
+        return candidate.toString();
+      }
+    }
+
+    return '';
   }
 }

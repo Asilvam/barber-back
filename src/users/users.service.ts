@@ -11,7 +11,7 @@ export class UsersService {
 
   findByEmail(email: string) {
     this.logger.debug(`Find by email email=${email}`);
-    return this.userModel.findOne({ email: email.toLowerCase() }).exec();
+    return this.userModel.findOne({ email: email.toLowerCase() }).select('+passwordHash').exec();
   }
 
   findByGoogleId(googleId: string) {
