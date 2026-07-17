@@ -4,6 +4,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { BUSINESS_TIME_ZONE } from './common/time/santiago-time';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -44,5 +45,6 @@ async function bootstrap() {
   const port = configService.get<number>('PORT', 3000);
   await app.listen(port);
   logger.log(`Application listening on ${port}`);
+  logger.log(`Business date and appointment validations use ${BUSINESS_TIME_ZONE}`);
 }
 void bootstrap();

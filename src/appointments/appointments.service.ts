@@ -7,6 +7,12 @@ import { User } from '../users/schemas/user.schema';
 import { Appointment, AppointmentDocument } from './entities/appointment.schema';
 import { Barber } from '../barbers/entities/barber.schema';
 import { BarberSchedule } from '../barber-schedules/entities/barber-schedule.schema';
+import {
+  BUSINESS_TIME_ZONE,
+  getSantiagoDateTime,
+  minutesToTime,
+  timeToMinutes,
+} from '../common/time/santiago-time';
 
 @Injectable()
 export class AppointmentsService {
@@ -79,13 +85,7 @@ export class AppointmentsService {
   }
 
   private getAppointmentCutoff() {
-    const now = new Date();
-    const pad = (value: number) => value.toString().padStart(2, '0');
-
-    return {
-      today: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
-      currentTime: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
-    };
+    return getSantiagoDateTime();
   }
 
   private isAppointmentSlotExpired(date: string, timeSlot: string) {
@@ -166,13 +166,13 @@ export class AppointmentsService {
     }
     this.logger.debug(`Schedule found for barber ${barberId} on ${date}.`);
 
-    const slotTime = new Date(`2000-01-01T${timeSlot}:00`);
+    const slotMinutes = timeToMinutes(timeSlot);
     let isWorkingHour = false;
 
     for (const wh of schedule.workingHours) {
-      const start = new Date(`2000-01-01T${wh.start}:00`);
-      const end = new Date(`2000-01-01T${wh.end}:00`);
-      if (slotTime >= start && slotTime < end) {
+      const startMinutes = timeToMinutes(wh.start);
+      const endMinutes = timeToMinutes(wh.end);
+      if (slotMinutes >= startMinutes && slotMinutes < endMinutes) {
         isWorkingHour = true;
         break;
       }
@@ -185,9 +185,9 @@ export class AppointmentsService {
     this.logger.debug(`Time slot ${timeSlot} is within working hours.`);
 
     for (const bt of schedule.breakTimes) {
-      const start = new Date(`2000-01-01T${bt.start}:00`);
-      const end = new Date(`2000-01-01T${bt.end}:00`);
-      if (slotTime >= start && slotTime < end) {
+      const startMinutes = timeToMinutes(bt.start);
+      const endMinutes = timeToMinutes(bt.end);
+      if (slotMinutes >= startMinutes && slotMinutes < endMinutes) {
         this.logger.warn(`Time slot ${timeSlot} is during barber ${barberId}'s break time on ${date}.`);
         throw new ConflictException(`Time slot ${timeSlot} is during barber's break time on ${date}`);
       }
@@ -328,6 +328,7 @@ export class AppointmentsService {
       const date = updateAppointmentDto.date || currentAppointment.date;
       const timeSlot = updateAppointmentDto.timeSlot || currentAppointment.timeSlot;
 
+      this.validateAppointmentSlotIsNotExpired(date, timeSlot);
       await this.validateBarberAvailabilityForSlot(barberId, date, timeSlot);
 
       this.logger.debug(`Checking for conflicts for updated appointment: barberId=${barberId}, date=${date}, timeSlot=${timeSlot}`);
@@ -416,33 +417,30 @@ export class AppointmentsService {
       };
     }
     this.logger.debug(`Schedule found for barber ${barberId} on ${date}. Working hours: ${JSON.stringify(schedule.workingHours)}, Break times: ${JSON.stringify(schedule.breakTimes)}`);
+    const cutoff = this.getAppointmentCutoff();
+    this.logger.debug(`Availability cutoff in ${BUSINESS_TIME_ZONE}: ${cutoff.today} ${cutoff.currentTime}.`);
 
     const slotDurationMinutes = 60;
     const allPossibleSlots: string[] = [];
 
     for (const wh of schedule.workingHours) {
-      let currentSlotTime = new Date(`2000-01-01T${wh.start}:00`);
-      const endWorkingTime = new Date(`2000-01-01T${wh.end}:00`);
+      const workingStart = timeToMinutes(wh.start);
+      const workingEnd = timeToMinutes(wh.end);
 
-      while (currentSlotTime.getTime() < endWorkingTime.getTime()) {
-        const slotEnd = new Date(currentSlotTime.getTime() + slotDurationMinutes * 60 * 1000);
-
-        if (slotEnd.getTime() > endWorkingTime.getTime()) {
-          break;
-        }
-
-        const formattedSlot = currentSlotTime.toTimeString().slice(0, 5);
+      for (
+        let currentSlot = workingStart;
+        currentSlot + slotDurationMinutes <= workingEnd;
+        currentSlot += slotDurationMinutes
+      ) {
+        const slotEnd = currentSlot + slotDurationMinutes;
+        const formattedSlot = minutesToTime(currentSlot);
 
         let isDuringBreak = false;
         for (const bt of schedule.breakTimes) {
-          const breakStart = new Date(`2000-01-01T${bt.start}:00`);
-          const breakEnd = new Date(`2000-01-01T${bt.end}:00`);
+          const breakStart = timeToMinutes(bt.start);
+          const breakEnd = timeToMinutes(bt.end);
 
-          if (
-            (currentSlotTime.getTime() >= breakStart.getTime() && currentSlotTime.getTime() < breakEnd.getTime()) ||
-            (slotEnd.getTime() > breakStart.getTime() && slotEnd.getTime() <= breakEnd.getTime()) ||
-            (breakStart.getTime() >= currentSlotTime.getTime() && breakStart.getTime() < slotEnd.getTime())
-          ) {
+          if (currentSlot < breakEnd && slotEnd > breakStart) {
             isDuringBreak = true;
             break;
           }
@@ -451,8 +449,6 @@ export class AppointmentsService {
         if (!isDuringBreak) {
           allPossibleSlots.push(formattedSlot);
         }
-
-        currentSlotTime = slotEnd;
       }
     }
     this.logger.debug(`Generated ${allPossibleSlots.length} possible slots before checking bookings.`);

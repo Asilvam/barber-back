@@ -17,7 +17,7 @@ describe('AppointmentsService security', () => {
   });
 
   it('filters active appointments by pending/confirmed status and non-expired date/time', () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-07-16T15:30:00'));
+    jest.useFakeTimers().setSystemTime(new Date('2026-07-16T19:30:00Z'));
 
     const service = new AppointmentsService({} as any, {} as any, {} as any, {} as any);
     const filter = (service as any).getNonExpiredActiveAppointmentFilter('507f1f77bcf86cd799439011');
@@ -33,7 +33,7 @@ describe('AppointmentsService security', () => {
   });
 
   it('filters barber booked slots by pending/confirmed status and non-expired date/time', () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-07-16T15:30:00'));
+    jest.useFakeTimers().setSystemTime(new Date('2026-07-16T19:30:00Z'));
 
     const service = new AppointmentsService({} as any, {} as any, {} as any, {} as any);
     const futureFilter = (service as any).getNonExpiredBarberAppointmentFilter(
@@ -62,6 +62,20 @@ describe('AppointmentsService security', () => {
       timeSlot: { $gte: '15:30' },
     });
     expect(expiredFilter).toBeNull();
+  });
+
+  it('keeps using the Chilean day when Heroku UTC has already advanced to tomorrow', () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-07-17T02:30:00Z'));
+
+    const service = new AppointmentsService({} as any, {} as any, {} as any, {} as any);
+    const filter = (service as any).getNonExpiredActiveAppointmentFilter('507f1f77bcf86cd799439011');
+
+    expect(filter).toMatchObject({
+      $or: [
+        { date: { $gt: '2026-07-16' } },
+        { date: '2026-07-16', timeSlot: { $gte: '22:30' } },
+      ],
+    });
   });
 
   it('maps duplicate key on create to ConflictException (409)', async () => {
