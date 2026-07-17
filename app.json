@@ -1,0 +1,26 @@
+{
+  "name": "Barber API",
+  "description": "NestJS API for the barber booking system.",
+  "env": {
+    "MONGODB_URI": {
+      "description": "MongoDB connection string used by the API.",
+      "required": true
+    },
+    "GOOGLE_CLIENT_ID": {
+      "description": "Google OAuth web client ID shared with the frontend.",
+      "required": true
+    },
+    "JWT_SECRET": {
+      "description": "Long random secret used to sign authentication tokens.",
+      "generator": "secret"
+    },
+    "JWT_EXPIRES_IN": {
+      "description": "Authentication token lifetime.",
+      "value": "1d"
+    },
+    "CORS_ORIGIN": {
+      "description": "Public HTTPS URL of the deployed frontend, without a trailing slash.",
+      "required": true
+    }
+  }
+}
