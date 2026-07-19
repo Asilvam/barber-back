@@ -13,6 +13,7 @@ import {
   minutesToTime,
   timeToMinutes,
 } from '../common/time/santiago-time';
+import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class AppointmentsService {
@@ -23,10 +24,15 @@ export class AppointmentsService {
     @InjectModel(Barber.name) private barberModel: Model<Barber>,
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(BarberSchedule.name) private barberScheduleModel: Model<BarberSchedule>,
+    private readonly emailService?: EmailService,
   ) {}
 
   private isMongoDuplicateKeyError(error: unknown): boolean {
     return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 11000;
+  }
+
+  private buildSlotKey(barberId: string, date: string, timeSlot: string): string {
+    return `${barberId}:${date}:${timeSlot}`;
   }
 
   private formatReferenceForLog(value: unknown) {
@@ -146,7 +152,7 @@ export class AppointmentsService {
 
     return {
       barberId: { $in: [new Types.ObjectId(barberId), barberId] },
-      status: { $in: ['pending', 'confirmed'] },
+      status: { $in: ['pending', 'confirmed', 'completed'] },
       ...dateTimeFilter,
     };
   }
@@ -193,6 +199,7 @@ export class AppointmentsService {
       }
     }
     this.logger.debug(`Time slot ${timeSlot} is not during break time.`);
+    return barber;
   }
 
   async create(clientId: string, createAppointmentDto: CreateAppointmentDto): Promise<Appointment> {
@@ -223,7 +230,7 @@ export class AppointmentsService {
     this.validateAppointmentSlotIsNotExpired(date, timeSlot);
 
     // 4. Validate barber availability and schedule rules
-    await this.validateBarberAvailabilityForSlot(barberId, date, timeSlot);
+    const barber = await this.validateBarberAvailabilityForSlot(barberId, date, timeSlot);
 
     // 5. Check if the slot is already booked
     const slotConflictFilter = this.getNonExpiredBarberAppointmentFilter(barberId, date, timeSlot);
@@ -240,6 +247,7 @@ export class AppointmentsService {
     const createdAppointment = new this.appointmentModel({
       ...createAppointmentDto,
       clientId: new Types.ObjectId(clientId),
+      slotKey: this.buildSlotKey(barberId, date, timeSlot),
     });
     let savedAppointment: AppointmentDocument;
     try {
@@ -252,7 +260,27 @@ export class AppointmentsService {
       throw error;
     }
     this.logger.log(`Appointment ${savedAppointment._id.toString()} created successfully for client ${clientId} with barber ${barberId} on ${date} at ${timeSlot}.`);
+    await this.notifyAppointmentCreated(client.email, client.name, barber.name, date, timeSlot);
     return savedAppointment;
+  }
+
+  private async notifyAppointmentCreated(to: string, clientName: string, barberName: string, date: string, timeSlot: string): Promise<void> {
+    if (!this.emailService) {
+      return;
+    }
+
+    try {
+      await this.emailService.sendAppointmentCreatedEmail({
+        to,
+        clientName,
+        barberName,
+        date,
+        timeSlot,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Appointment was created, but its confirmation email failed for ${to}: ${message}`);
+    }
   }
 
   async findAll() {
@@ -323,11 +351,14 @@ export class AppointmentsService {
     }
     this.logger.debug(`Current appointment ${id} found for update.`);
 
-    if (updateAppointmentDto.date || updateAppointmentDto.timeSlot || updateAppointmentDto.barberId) {
-      const barberId = updateAppointmentDto.barberId || (currentAppointment.barberId as Types.ObjectId).toString();
-      const date = updateAppointmentDto.date || currentAppointment.date;
-      const timeSlot = updateAppointmentDto.timeSlot || currentAppointment.timeSlot;
+    const barberId = updateAppointmentDto.barberId || (currentAppointment.barberId as Types.ObjectId).toString();
+    const date = updateAppointmentDto.date || currentAppointment.date;
+    const timeSlot = updateAppointmentDto.timeSlot || currentAppointment.timeSlot;
+    const status = updateAppointmentDto.status || currentAppointment.status;
+    const changesSlot = Boolean(updateAppointmentDto.date || updateAppointmentDto.timeSlot || updateAppointmentDto.barberId);
+    const reactivatesCancelledAppointment = currentAppointment.status === 'cancelled' && status !== 'cancelled';
 
+    if (status !== 'cancelled' && (changesSlot || reactivatesCancelledAppointment)) {
       this.validateAppointmentSlotIsNotExpired(date, timeSlot);
       await this.validateBarberAvailabilityForSlot(barberId, date, timeSlot);
 
@@ -349,10 +380,23 @@ export class AppointmentsService {
       this.logger.debug('No conflicts detected for updated appointment schedule.');
     }
 
+    const persistenceUpdate: {
+      $set: Record<string, unknown>;
+      $unset?: { slotKey: 1 };
+    } = {
+      $set: { ...updateAppointmentDto },
+    };
+
+    if (status === 'cancelled') {
+      persistenceUpdate.$unset = { slotKey: 1 };
+    } else {
+      persistenceUpdate.$set.slotKey = this.buildSlotKey(barberId, date, timeSlot);
+    }
+
     let updatedAppointment: AppointmentDocument | null;
     try {
       updatedAppointment = await this.appointmentModel
-        .findByIdAndUpdate(id, { $set: updateAppointmentDto }, { returnDocument: 'after' })
+        .findByIdAndUpdate(id, persistenceUpdate, { returnDocument: 'after', runValidators: true })
         .populate('barberId')
         .populate('clientId', '_id name email role provider emailVerified createdAt updatedAt')
         .exec();
@@ -369,7 +413,40 @@ export class AppointmentsService {
       throw new NotFoundException(`Appointment with ID ${id} not found`); // Should theoretically not happen if currentAppointment was found
     }
     this.logger.log(`Appointment ${id} updated successfully.`);
+    if (currentAppointment.status !== 'cancelled' && updatedAppointment.status === 'cancelled') {
+      if (this.isAppointmentSlotExpired(updatedAppointment.date, updatedAppointment.timeSlot)) {
+        this.logger.debug(`Skipping cancellation email for expired appointment ${id}.`);
+      } else {
+        await this.notifyAppointmentCancelled(updatedAppointment);
+      }
+    }
     return updatedAppointment;
+  }
+
+  private async notifyAppointmentCancelled(appointment: AppointmentDocument): Promise<void> {
+    if (!this.emailService) {
+      return;
+    }
+
+    const client = appointment.clientId as User;
+    const barber = appointment.barberId as Barber;
+    if (!client.email || !client.name || !barber.name) {
+      this.logger.warn(`Appointment ${appointment._id.toString()} was cancelled, but its populated email data is incomplete.`);
+      return;
+    }
+
+    try {
+      await this.emailService.sendAppointmentCancelledEmail({
+        to: client.email,
+        clientName: client.name,
+        barberName: barber.name,
+        date: appointment.date,
+        timeSlot: appointment.timeSlot,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Appointment was cancelled, but its notification email failed for ${client.email}: ${message}`);
+    }
   }
 
   async remove(id: string) {

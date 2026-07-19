@@ -40,11 +40,41 @@ function validateCorsOrigin(rawOrigins: string): string {
   return origins.join(',');
 }
 
+function validateHttpUrl(rawUrl: string, key: string): string {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error(`Invalid ${key}. Expected an absolute HTTP(S) URL`);
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`Invalid ${key}. Expected an absolute HTTP(S) URL`);
+  }
+
+  return rawUrl.replace(/\/+$/, '');
+}
+
+function validateEmailTimeout(rawTimeout: unknown): number {
+  if (rawTimeout === undefined || rawTimeout === '') {
+    return 5000;
+  }
+
+  const timeout = Number(rawTimeout);
+  if (!Number.isInteger(timeout) || timeout < 100 || timeout > 30000) {
+    throw new Error('EMAIL_SERVICE_TIMEOUT_MS must be an integer between 100 and 30000');
+  }
+  return timeout;
+}
+
 export function validateEnv(config: EnvMap): EnvMap {
   const mongodbUri = validateMongoUri(getRequiredString(config, 'MONGODB_URI'));
   const jwtSecret = getRequiredString(config, 'JWT_SECRET');
   const jwtExpiresIn = getRequiredString(config, 'JWT_EXPIRES_IN');
   const corsOrigin = validateCorsOrigin(getRequiredString(config, 'CORS_ORIGIN'));
+  const emailServiceUrl = validateHttpUrl(getRequiredString(config, 'EMAIL_SERVICE_URL'), 'EMAIL_SERVICE_URL');
+  const emailServiceApiKey = getRequiredString(config, 'EMAIL_SERVICE_API_KEY');
+  const emailServiceTimeout = validateEmailTimeout(config.EMAIL_SERVICE_TIMEOUT_MS);
 
   if (jwtSecret === 'change_me') {
     throw new Error('JWT_SECRET cannot use insecure default value');
@@ -56,5 +86,8 @@ export function validateEnv(config: EnvMap): EnvMap {
     JWT_SECRET: jwtSecret,
     JWT_EXPIRES_IN: jwtExpiresIn,
     CORS_ORIGIN: corsOrigin,
+    EMAIL_SERVICE_URL: emailServiceUrl,
+    EMAIL_SERVICE_API_KEY: emailServiceApiKey,
+    EMAIL_SERVICE_TIMEOUT_MS: emailServiceTimeout,
   };
 }

@@ -16,6 +16,7 @@ NestJS backend with local and Google auth, JWT, MongoDB, and Swagger docs.
 - MongoDB (Mongoose) with schemas for Users, Barbers, Appointments, and **Barber Schedules**
 - CRUD operations for Users, Barbers, Appointments, and **Barber Schedules**
 - Appointment scheduling logic (available slots, conflict detection)
+- Transactional email for appointment creation and active appointment cancellation
 - Swagger docs
 
 ## Requirements
@@ -38,12 +39,19 @@ GOOGLE_CLIENT_SECRET=your_google_client_id
 JWT_SECRET=replace_with_a_strong_secret
 JWT_EXPIRES_IN=1d
 CORS_ORIGIN=http://localhost:5173
+EMAIL_SERVICE_URL=http://localhost:3001
+EMAIL_SERVICE_API_KEY=replace_with_the_same_key_used_by_email_send_microservice
+EMAIL_SERVICE_TIMEOUT_MS=5000
+EMAIL_FROM_NAME=Barber
 ```
 
 Notes:
 
 - `JWT_SECRET` is required and cannot be `change_me`.
 - `CORS_ORIGIN` must be an explicit origin or comma-separated allowlist (no `*`).
+- `EMAIL_SERVICE_URL` is the public/base URL of `email-send-microservice`.
+- `EMAIL_SERVICE_API_KEY` must match the microservice's `INTERNAL_API_KEY`.
+- `EMAIL_FROM_NAME` controls the sender display name used by appointment emails.
 
 ## Security hardening
 
@@ -56,6 +64,16 @@ Notes:
 - `GET/PATCH/DELETE /users/:id` now allow only `self` or `admin`.
 - `GET /appointments/:id` now allows only appointment owner or admin.
 - Appointment create/update now maps Mongo duplicate key (`E11000`) to `409 Conflict`.
+
+## Appointment lifecycle
+
+- Creating an appointment assigns an internal `slotKey` and sends a confirmation email.
+- Changing an active appointment to `cancelled` removes its `slotKey`, releases the block, and emails the client.
+- Cancelling an expired appointment does not send email.
+- `completed` appointments retain their `slotKey`; expired blocks cannot be booked again.
+- Email delivery failures are logged and never roll back appointment creation or cancellation.
+- `DELETE /appointments/:id` permanently deletes the record and does not send a cancellation email.
+- Appointment expiration is evaluated in the `America/Santiago` timezone.
 
 ## Run
 
@@ -226,7 +244,6 @@ Response:
   "barberId": "...",
   "availableSlots": ["HH:MM", "HH:MM", ...]
 }
-}
 ```
 
 #### `GET /appointments/:id`
@@ -238,6 +255,9 @@ Response: `Appointment`
 Update or cancel an appointment.
 Request: `Partial<UpdateAppointmentDto>`
 Response: `Appointment`
+
+Changing a current appointment to `cancelled` releases its block and notifies
+the client by email. Expired appointments do not trigger email.
 
 #### `DELETE /appointments/:id` (Admin Only)
 Delete an appointment.

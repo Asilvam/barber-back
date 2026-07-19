@@ -6,9 +6,11 @@ import { Appointment, AppointmentSchema } from './entities/appointment.schema'; 
 import { Barber, BarberSchema } from '../barbers/entities/barber.schema'; // Import Barber schema for injection in service
 import { BarberSchedule, BarberScheduleSchema } from '../barber-schedules/entities/barber-schedule.schema'; // Import BarberSchedule schema
 import { User, UserSchema } from '../users/schemas/user.schema'; // Import User schema
+import { EmailModule } from '../email/email.module';
 
 @Module({
   imports: [
+    EmailModule,
     MongooseModule.forFeature([
       { name: Appointment.name, schema: AppointmentSchema },
       { name: Barber.name, schema: BarberSchema }, // Also register Barber schema as it's injected in AppointmentsService

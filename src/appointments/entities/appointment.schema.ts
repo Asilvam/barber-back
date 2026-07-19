@@ -17,6 +17,11 @@ export class Appointment {
   @Prop({ required: true, type: String })
   timeSlot: string;
 
+  // Identificador de ocupación administrado por AppointmentsService.
+  // Se elimina cuando la cita es cancelada para liberar el bloque.
+  @Prop({ type: String })
+  slotKey?: string;
+
   // Relación con el Barbero seleccionado
   @Prop({ type: Types.ObjectId, ref: 'Barber', required: true })
   barberId: Types.ObjectId | Barber;
@@ -37,6 +42,13 @@ export class Appointment {
 export type AppointmentDocument = Appointment & Document;
 export const AppointmentSchema = SchemaFactory.createForClass(Appointment);
 
-// Restricción única a nivel de Base de Datos:
-// Evita que un mismo barbero tenga dos citas agendadas el mismo día a la misma hora.
-AppointmentSchema.index({ barberId: 1, date: 1, timeSlot: 1 }, { unique: true });
+// La base sólo garantiza la unicidad del identificador que administra el backend.
+// Las citas canceladas no tienen slotKey y, por lo tanto, no ocupan el bloque.
+AppointmentSchema.index(
+  { slotKey: 1 },
+  {
+    name: 'unique_appointment_slot_key',
+    unique: true,
+    sparse: true,
+  },
+);
