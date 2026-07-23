@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Req, Logger, ForbiddenException } from '@nestjs/common'; // Importamos Logger
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Req, Logger, ForbiddenException, ConflictException } from '@nestjs/common'; // Importamos Logger
 import { AppointmentsService } from './appointments.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
@@ -57,6 +57,26 @@ export class AppointmentsController {
     const clientId = req.user.userId;
     this.logger.log(`Received request to get active appointment for client ${clientId}.`);
     return this.appointmentsService.findActiveByClient(clientId);
+  }
+
+  @Patch('me/:id/cancel')
+  @ApiOperation({ summary: 'Cancelar la cita propia activa del cliente autenticado' })
+  async cancelMyAppointment(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    const clientId = req.user.userId;
+    this.logger.log(`Received self-cancel request for appointment ${id} from client ${clientId}.`);
+
+    const appointment = await this.appointmentsService.findOne(id);
+    const appointmentClientId = this.extractClientId((appointment as { clientId?: unknown }).clientId);
+
+    if (appointmentClientId !== clientId) {
+      throw new ForbiddenException('No tienes permisos para cancelar esta cita');
+    }
+
+    if (!['pending', 'confirmed'].includes(appointment.status)) {
+      throw new ConflictException('Solo se pueden cancelar citas pendientes o confirmadas');
+    }
+
+    return this.appointmentsService.update(id, { status: 'cancelled' });
   }
 
   @Get(':id')

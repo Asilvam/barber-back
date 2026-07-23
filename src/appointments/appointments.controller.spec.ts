@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { AppointmentsController } from './appointments.controller';
 import { UserRole } from '../users/schemas/user.schema';
 
@@ -48,5 +48,50 @@ describe('AppointmentsController security', () => {
         user: { userId: 'admin-id', role: UserRole.ADMIN, email: 'admin@test.com' },
       } as any),
     ).resolves.toEqual(appointment);
+  });
+
+  it('allows owner to cancel own pending appointment', async () => {
+    appointmentsService.findOne.mockResolvedValue({
+      id: 'a1',
+      clientId: { _id: 'owner-id' },
+      status: 'pending',
+    });
+    appointmentsService.update.mockResolvedValue({ id: 'a1', status: 'cancelled' });
+
+    await expect(
+      controller.cancelMyAppointment('a1', {
+        user: { userId: 'owner-id', role: UserRole.USER, email: 'u@test.com' },
+      } as any),
+    ).resolves.toEqual({ id: 'a1', status: 'cancelled' });
+
+    expect(appointmentsService.update).toHaveBeenCalledWith('a1', { status: 'cancelled' });
+  });
+
+  it('denies cancellation when appointment belongs to another user', async () => {
+    appointmentsService.findOne.mockResolvedValue({
+      id: 'a1',
+      clientId: { _id: 'owner-id' },
+      status: 'pending',
+    });
+
+    await expect(
+      controller.cancelMyAppointment('a1', {
+        user: { userId: 'other-user-id', role: UserRole.USER, email: 'u@test.com' },
+      } as any),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('rejects cancellation for non-cancellable appointment statuses', async () => {
+    appointmentsService.findOne.mockResolvedValue({
+      id: 'a1',
+      clientId: { _id: 'owner-id' },
+      status: 'completed',
+    });
+
+    await expect(
+      controller.cancelMyAppointment('a1', {
+        user: { userId: 'owner-id', role: UserRole.USER, email: 'u@test.com' },
+      } as any),
+    ).rejects.toThrow(ConflictException);
   });
 });
