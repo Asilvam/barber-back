@@ -3,7 +3,7 @@ import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
 import { Model, Types } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
-import { User } from '../users/schemas/user.schema';
+import { User, UserRole } from '../users/schemas/user.schema';
 import { Appointment, AppointmentDocument } from './entities/appointment.schema';
 import { Barber } from '../barbers/entities/barber.schema';
 import { BarberSchedule } from '../barber-schedules/entities/barber-schedule.schema';
@@ -214,17 +214,22 @@ export class AppointmentsService {
     }
     this.logger.debug(`Client ${clientId} found.`);
 
-    // 2. Validar que el cliente no tenga ya una reserva activa
-    const existingActiveAppointment = await this.appointmentModel
-      .findOne(this.getNonExpiredActiveAppointmentFilter(clientId))
-      .populate('barberId')
-      .populate('clientId', '_id name email role provider emailVerified createdAt updatedAt')
-      .exec();
-    if (existingActiveAppointment) {
-      this.logger.warn(`Client ${clientId} already has an active appointment: ${JSON.stringify(this.formatAppointmentForLog(existingActiveAppointment))}.`);
-      throw new ConflictException('Ya tienes una reserva activa. Debes completar o cancelar tu cita actual antes de programar una nueva.');
+    // 2. Los clientes tienen una sola reserva activa; los administradores pueden
+    // crear varias a su nombre mientras el bloque solicitado siga disponible.
+    if (client.role !== UserRole.ADMIN) {
+      const existingActiveAppointment = await this.appointmentModel
+        .findOne(this.getNonExpiredActiveAppointmentFilter(clientId))
+        .populate('barberId')
+        .populate('clientId', '_id name email role provider emailVerified createdAt updatedAt')
+        .exec();
+      if (existingActiveAppointment) {
+        this.logger.warn(`Client ${clientId} already has an active appointment: ${JSON.stringify(this.formatAppointmentForLog(existingActiveAppointment))}.`);
+        throw new ConflictException('Ya tienes una reserva activa. Debes completar o cancelar tu cita actual antes de programar una nueva.');
+      }
+      this.logger.debug(`Client ${clientId} has no non-expired active appointments.`);
+    } else {
+      this.logger.debug(`Admin ${clientId} can create multiple active appointments.`);
     }
-    this.logger.debug(`Client ${clientId} has no non-expired active appointments.`);
 
     // 3. Reject expired slots before checking barber schedule rules
     this.validateAppointmentSlotIsNotExpired(date, timeSlot);

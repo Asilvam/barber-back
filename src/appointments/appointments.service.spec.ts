@@ -1,6 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { AppointmentsService } from './appointments.service';
+import { UserRole } from '../users/schemas/user.schema';
 
 function queryResolved<T>(value: T) {
   return {
@@ -113,6 +114,121 @@ describe('AppointmentsService security', () => {
         timeSlot: '10:00',
       }),
     ).rejects.toThrow(ConflictException);
+  });
+
+  it('allows an admin to create multiple active appointments in available slots', async () => {
+    const clientId = '507f1f77bcf86cd799439011';
+    const barberId = '507f1f77bcf86cd799439012';
+    const savedAppointment = {
+      _id: new Types.ObjectId('507f1f77bcf86cd799439013'),
+      barberId: new Types.ObjectId(barberId),
+      clientId: new Types.ObjectId(clientId),
+      date: '2026-08-10',
+      timeSlot: '10:00',
+      status: 'pending',
+    };
+    const appointmentModel: any = jest.fn().mockImplementation(() => ({
+      save: jest.fn().mockResolvedValue(savedAppointment),
+    }));
+    appointmentModel.findOne = jest.fn((filter: Record<string, unknown>) =>
+      queryResolved('clientId' in filter ? { _id: 'existing-active-appointment' } : null),
+    );
+
+    const barberModel: any = {
+      findById: jest.fn().mockReturnValue(
+        queryResolved({ _id: barberId, name: 'Barber Test' }),
+      ),
+    };
+    const userModel: any = {
+      findById: jest.fn().mockReturnValue(
+        queryResolved({
+          _id: clientId,
+          name: 'Admin Test',
+          email: 'admin@example.com',
+          role: UserRole.ADMIN,
+        }),
+      ),
+    };
+    const barberScheduleModel: any = {
+      findOne: jest.fn().mockReturnValue(
+        queryResolved({
+          isDayOff: false,
+          workingHours: [{ start: '09:00', end: '18:00' }],
+          breakTimes: [],
+        }),
+      ),
+    };
+    const service = new AppointmentsService(
+      appointmentModel,
+      barberModel,
+      userModel,
+      barberScheduleModel,
+    );
+
+    await expect(
+      service.create(clientId, {
+        barberId,
+        date: '2026-08-10',
+        timeSlot: '10:00',
+      }),
+    ).resolves.toBe(savedAppointment);
+    expect(appointmentModel.findOne).toHaveBeenCalledTimes(1);
+    expect(appointmentModel.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        barberId: expect.any(Object),
+        date: '2026-08-10',
+        timeSlot: '10:00',
+      }),
+    );
+  });
+
+  it('still rejects an occupied slot when an admin creates an appointment', async () => {
+    const clientId = '507f1f77bcf86cd799439011';
+    const barberId = '507f1f77bcf86cd799439012';
+    const appointmentModel: any = jest.fn();
+    appointmentModel.findOne = jest.fn().mockReturnValue(
+      queryResolved({ _id: 'appointment-already-using-the-slot' }),
+    );
+
+    const barberModel: any = {
+      findById: jest.fn().mockReturnValue(
+        queryResolved({ _id: barberId, name: 'Barber Test' }),
+      ),
+    };
+    const userModel: any = {
+      findById: jest.fn().mockReturnValue(
+        queryResolved({
+          _id: clientId,
+          name: 'Admin Test',
+          email: 'admin@example.com',
+          role: UserRole.ADMIN,
+        }),
+      ),
+    };
+    const barberScheduleModel: any = {
+      findOne: jest.fn().mockReturnValue(
+        queryResolved({
+          isDayOff: false,
+          workingHours: [{ start: '09:00', end: '18:00' }],
+          breakTimes: [],
+        }),
+      ),
+    };
+    const service = new AppointmentsService(
+      appointmentModel,
+      barberModel,
+      userModel,
+      barberScheduleModel,
+    );
+
+    await expect(
+      service.create(clientId, {
+        barberId,
+        date: '2026-08-10',
+        timeSlot: '10:00',
+      }),
+    ).rejects.toThrow('This time slot is already occupied');
+    expect(appointmentModel).not.toHaveBeenCalled();
   });
 
   it('maps duplicate key on update to ConflictException (409)', async () => {
