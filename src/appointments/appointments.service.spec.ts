@@ -278,6 +278,7 @@ describe('AppointmentsService security', () => {
         email: 'client@example.com',
       },
       status: 'cancelled',
+      cancelledBy: 'user',
       slotKey: undefined,
     };
     const appointmentModel: any = {
@@ -289,11 +290,15 @@ describe('AppointmentsService security', () => {
     };
     const service = new AppointmentsService(appointmentModel, {} as any, {} as any, {} as any, emailService);
 
-    await expect(service.update(appointmentId, { status: 'cancelled' })).resolves.toBe(updatedAppointment);
+    await expect(service.update(appointmentId, { status: 'cancelled' }, 'user')).resolves.toBe(updatedAppointment);
     expect(appointmentModel.findByIdAndUpdate).toHaveBeenCalledWith(
       appointmentId,
       {
-        $set: { status: 'cancelled' },
+        $set: {
+          status: 'cancelled',
+          cancelledBy: 'user',
+          cancelledAt: expect.any(Date),
+        },
         $unset: { slotKey: 1 },
       },
       { returnDocument: 'after', runValidators: true },
@@ -331,6 +336,7 @@ describe('AppointmentsService security', () => {
         email: 'client@example.com',
       },
       status: 'cancelled',
+      cancelledBy: 'user',
       slotKey: undefined,
     };
     const appointmentModel: any = {
@@ -342,12 +348,12 @@ describe('AppointmentsService security', () => {
     };
     const service = new AppointmentsService(appointmentModel, {} as any, {} as any, {} as any, emailService);
 
-    await expect(service.update(appointmentId, { status: 'cancelled' })).resolves.toBe(updatedAppointment);
+    await expect(service.update(appointmentId, { status: 'cancelled' }, 'user')).resolves.toBe(updatedAppointment);
     expect(appointmentModel.findByIdAndUpdate).toHaveBeenCalled();
     expect(emailService.sendAppointmentCancelledEmail).not.toHaveBeenCalled();
   });
 
-  it('restores slotKey when a cancelled appointment is reactivated', async () => {
+  it('rejects every update after an appointment is cancelled', async () => {
     const appointmentId = '507f1f77bcf86cd799439013';
     const barberId = '507f1f77bcf86cd799439012';
     const currentAppointment = {
@@ -358,41 +364,16 @@ describe('AppointmentsService security', () => {
       timeSlot: '10:00',
       status: 'cancelled',
     };
-    const updatedAppointment = {
-      ...currentAppointment,
-      status: 'pending',
-      slotKey: `${barberId}:2026-08-10:10:00`,
-    };
     const appointmentModel: any = {
       findById: jest.fn().mockReturnValue(queryResolved(currentAppointment)),
-      findOne: jest.fn().mockReturnValue(queryResolved(null)),
-      findByIdAndUpdate: jest.fn().mockReturnValue(queryResolved(updatedAppointment)),
+      findByIdAndUpdate: jest.fn(),
     };
-    const barberModel: any = {
-      findById: jest.fn().mockReturnValue(queryResolved({ _id: barberId, name: 'Barber Test' })),
-    };
-    const barberScheduleModel: any = {
-      findOne: jest.fn().mockReturnValue(
-        queryResolved({
-          isDayOff: false,
-          workingHours: [{ start: '09:00', end: '18:00' }],
-          breakTimes: [],
-        }),
-      ),
-    };
-    const service = new AppointmentsService(appointmentModel, barberModel, {} as any, barberScheduleModel);
+    const service = new AppointmentsService(appointmentModel, {} as any, {} as any, {} as any);
 
-    await expect(service.update(appointmentId, { status: 'pending' })).resolves.toBe(updatedAppointment);
-    expect(appointmentModel.findByIdAndUpdate).toHaveBeenCalledWith(
-      appointmentId,
-      {
-        $set: {
-          status: 'pending',
-          slotKey: `${barberId}:2026-08-10:10:00`,
-        },
-      },
-      { returnDocument: 'after', runValidators: true },
+    await expect(service.update(appointmentId, { status: 'pending' })).rejects.toThrow(
+      'Una reserva cancelada es definitiva y no puede modificarse.',
     );
+    expect(appointmentModel.findByIdAndUpdate).not.toHaveBeenCalled();
   });
 
   it('keeps slotKey when an appointment is completed', async () => {

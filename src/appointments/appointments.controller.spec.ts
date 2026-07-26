@@ -64,7 +64,23 @@ describe('AppointmentsController security', () => {
       } as any),
     ).resolves.toEqual({ id: 'a1', status: 'cancelled' });
 
-    expect(appointmentsService.update).toHaveBeenCalledWith('a1', { status: 'cancelled' });
+    expect(appointmentsService.update).toHaveBeenCalledWith('a1', { status: 'cancelled' }, 'user');
+  });
+
+  it('marks an admin cancellation with its origin', async () => {
+    appointmentsService.update.mockResolvedValue({
+      id: 'a1',
+      status: 'cancelled',
+      cancelledBy: 'admin',
+    });
+
+    await expect(controller.update('a1', { status: 'cancelled' })).resolves.toEqual({
+      id: 'a1',
+      status: 'cancelled',
+      cancelledBy: 'admin',
+    });
+
+    expect(appointmentsService.update).toHaveBeenCalledWith('a1', { status: 'cancelled' }, 'admin');
   });
 
   it('denies cancellation when appointment belongs to another user', async () => {

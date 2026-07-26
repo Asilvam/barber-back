@@ -76,7 +76,7 @@ export class AppointmentsController {
       throw new ConflictException('Solo se pueden cancelar citas pendientes o confirmadas');
     }
 
-    return this.appointmentsService.update(id, { status: 'cancelled' });
+    return this.appointmentsService.update(id, { status: 'cancelled' }, 'user');
   }
 
   @Get(':id')
@@ -103,7 +103,7 @@ export class AppointmentsController {
   @ApiOperation({ summary: 'Actualizar o cancelar una cita (Admin)' })
   update(@Param('id') id: string, @Body() updateAppointmentDto: UpdateAppointmentDto) {
     this.logger.log(`Received request to update appointment ${id}. Data: ${JSON.stringify(updateAppointmentDto)}`);
-    return this.appointmentsService.update(id, updateAppointmentDto);
+    return this.appointmentsService.update(id, updateAppointmentDto, 'admin');
   }
 
   @Delete(':id')

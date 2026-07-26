@@ -342,7 +342,11 @@ export class AppointmentsService {
     return appointment;
   }
 
-  async update(id: string, updateAppointmentDto: UpdateAppointmentDto): Promise<AppointmentDocument> {
+  async update(
+    id: string,
+    updateAppointmentDto: UpdateAppointmentDto,
+    cancellationActor?: 'user' | 'admin',
+  ): Promise<AppointmentDocument> {
     this.logger.log(`Attempting to update appointment ${id} with data: ${JSON.stringify(updateAppointmentDto)}`);
     if (!Types.ObjectId.isValid(id)) {
       this.logger.warn(`Invalid ID format: ${id} for update appointment.`);
@@ -356,14 +360,18 @@ export class AppointmentsService {
     }
     this.logger.debug(`Current appointment ${id} found for update.`);
 
+    if (currentAppointment.status === 'cancelled') {
+      this.logger.warn(`Appointment ${id} is cancelled and cannot be modified.`);
+      throw new ConflictException('Una reserva cancelada es definitiva y no puede modificarse.');
+    }
+
     const barberId = updateAppointmentDto.barberId || (currentAppointment.barberId as Types.ObjectId).toString();
     const date = updateAppointmentDto.date || currentAppointment.date;
     const timeSlot = updateAppointmentDto.timeSlot || currentAppointment.timeSlot;
     const status = updateAppointmentDto.status || currentAppointment.status;
     const changesSlot = Boolean(updateAppointmentDto.date || updateAppointmentDto.timeSlot || updateAppointmentDto.barberId);
-    const reactivatesCancelledAppointment = currentAppointment.status === 'cancelled' && status !== 'cancelled';
 
-    if (status !== 'cancelled' && (changesSlot || reactivatesCancelledAppointment)) {
+    if (status !== 'cancelled' && changesSlot) {
       this.validateAppointmentSlotIsNotExpired(date, timeSlot);
       await this.validateBarberAvailabilityForSlot(barberId, date, timeSlot);
 
@@ -393,6 +401,10 @@ export class AppointmentsService {
     };
 
     if (status === 'cancelled') {
+      if (cancellationActor) {
+        persistenceUpdate.$set.cancelledBy = cancellationActor;
+      }
+      persistenceUpdate.$set.cancelledAt = new Date();
       persistenceUpdate.$unset = { slotKey: 1 };
     } else {
       persistenceUpdate.$set.slotKey = this.buildSlotKey(barberId, date, timeSlot);

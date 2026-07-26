@@ -34,6 +34,13 @@ export class Appointment {
   })
   status: string;
 
+  // Registra quién ejecutó la cancelación para mostrar su origen en administración.
+  @Prop({ type: String, enum: ['user', 'admin'] })
+  cancelledBy?: 'user' | 'admin';
+
+  @Prop({ type: Date })
+  cancelledAt?: Date;
+
   // Comentarios o peticiones especiales del cliente
   // @Prop({ trim: true })
   // notes?: string; // Eliminado
