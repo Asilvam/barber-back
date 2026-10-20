@@ -371,6 +371,23 @@ export class AppointmentsService {
       throw new ConflictException('Una reserva cancelada es definitiva y no puede modificarse.');
     }
 
+    if (currentAppointment.status === 'completed') {
+      throw new ConflictException('Una reserva completada es definitiva y no puede modificarse.');
+    }
+
+    const requestedStatus = updateAppointmentDto.status;
+    if (requestedStatus && requestedStatus !== currentAppointment.status) {
+      const allowed = currentAppointment.status === 'pending' ? ['confirmed', 'cancelled'] : ['completed', 'cancelled'];
+      if (!allowed.includes(requestedStatus)) {
+        throw new ConflictException('El cambio de estado solicitado no está permitido.');
+      }
+      if (requestedStatus === 'completed') {
+        if (cancellationActor !== 'admin') throw new ForbiddenException('Solo administración puede completar una reserva.');
+        const startsAt = getSantiagoAppointmentTimestamp(currentAppointment.date, currentAppointment.timeSlot);
+        if (Date.now() < startsAt) throw new ConflictException('Solo puedes completar la reserva desde su hora de inicio.');
+      }
+    }
+
     if (updateAppointmentDto.status === 'cancelled' && cancellationActor === 'user') {
       const startsAt = getSantiagoAppointmentTimestamp(currentAppointment.date, currentAppointment.timeSlot);
       if (startsAt - Date.now() < 12 * 60 * 60 * 1000) {
@@ -446,10 +463,7 @@ export class AppointmentsService {
 
     let updatedAppointment: AppointmentDocument | null;
     try {
-      const confirmationTransition = currentAppointment.status === 'pending' && status === 'confirmed';
-      const updateQuery = confirmationTransition
-        ? this.appointmentModel.findOneAndUpdate({ _id: id, status: 'pending' }, persistenceUpdate, { returnDocument: 'after', runValidators: true })
-        : this.appointmentModel.findByIdAndUpdate(id, persistenceUpdate, { returnDocument: 'after', runValidators: true });
+      const updateQuery = this.appointmentModel.findOneAndUpdate({ _id: id, status: currentAppointment.status }, persistenceUpdate, { returnDocument: 'after', runValidators: true });
       updatedAppointment = await updateQuery.populate('barberId').populate('clientId', '_id name email role provider emailVerified createdAt updatedAt').exec();
     } catch (error) {
       if (this.isActiveClientDuplicate(error)) throw this.activeClientConflict();
@@ -461,11 +475,7 @@ export class AppointmentsService {
     }
 
     if (!updatedAppointment) {
-      if (currentAppointment.status === 'pending' && status === 'confirmed') {
-        throw new ConflictException('La reserva cambió de estado. Actualiza la lista antes de confirmar.');
-      }
-      this.logger.error(`Failed to update appointment ${id} despite finding it.`);
-      throw new NotFoundException(`Appointment with ID ${id} not found`); // Should theoretically not happen if currentAppointment was found
+      throw new ConflictException('La reserva cambió de estado. Actualiza la lista antes de continuar.');
     }
     this.logger.log(`Appointment ${id} updated successfully.`);
     if (currentAppointment.status === 'pending' && updatedAppointment.status === 'confirmed') {

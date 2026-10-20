@@ -336,3 +336,11 @@ Response: `Appointment`
 - A `pending` → `confirmed` transition sends the client a confirmation email with barber, date, time, and confirmed status. The database update checks that the reservation is still pending so concurrent confirmations cannot both trigger the email. Saving an already confirmed reservation does not resend it.
 - Delivery uses the existing email service. Failures are logged without reverting the confirmed reservation; no retry queue is implemented.
 - Client access HTTP tests use mocked services and no database or email: `npx jest --config ./test/jest-e2e.json --runInBand client-access`.
+
+### Reservation state transitions
+
+- Pending reservations can be confirmed or cancelled.
+- Confirmed reservations can be cancelled, or completed by administration from their start time onward (America/Santiago). Past confirmed reservations can therefore be closed manually.
+- Cancelled and completed reservations are final and cannot be edited or reactivated. There is no automatic completion.
+- Updates check the previously read state atomically. If another request changed it, the API returns 409 instead of overwriting the new state.
+- Completion keeps the occupied slot and removes the active-client key; existing cancellation and deletion policies are unchanged.

@@ -4,7 +4,7 @@ import { AppointmentsService } from './appointments.service';
 import { UserRole } from '../users/schemas/user.schema';
 
 type ServiceDependencies = ConstructorParameters<typeof AppointmentsService>;
-type ModelMock = Partial<Record<'findOneAndUpdate' | 'findOne' | 'findById' | 'findByIdAndUpdate' | 'updateMany', jest.Mock>>;
+type ModelMock = Partial<Record<'findOneAndUpdate' | 'findOne' | 'findById' | 'updateMany', jest.Mock>>;
 
 // These tests provide only the Mongoose methods exercised by each scenario.
 function createService(appointments: ModelMock = {}, barbers: ModelMock = {}, users: ModelMock = {}, schedules: ModelMock = {}, email?: Partial<NonNullable<ServiceDependencies[4]>>) {
@@ -59,7 +59,7 @@ describe('AppointmentsService security', () => {
     const id = '507f1f77bcf86cd799439013';
     const current = { _id: new Types.ObjectId(id), clientId: new Types.ObjectId('507f1f77bcf86cd799439011'), barberId: new Types.ObjectId('507f1f77bcf86cd799439012'), date: '2020-08-10', timeSlot: '10:00', status: 'confirmed' };
     const mail = { sendAppointmentConfirmedEmail: jest.fn() };
-    const service = createService({ findById: jest.fn().mockReturnValue(queryResolved(current)), findByIdAndUpdate: jest.fn().mockReturnValue(queryResolved(current)) }, {}, {}, {}, mail);
+    const service = createService({ findById: jest.fn().mockReturnValue(queryResolved(current)), findOneAndUpdate: jest.fn().mockReturnValue(queryResolved(current)) }, {}, {}, {}, mail);
     await service.update(id, { status: 'confirmed' }, 'admin');
     expect(mail.sendAppointmentConfirmedEmail).not.toHaveBeenCalled();
   });
@@ -281,7 +281,7 @@ describe('AppointmentsService security', () => {
           timeSlot: '10:00',
         }),
       ),
-      findByIdAndUpdate: jest.fn().mockReturnValue(chain),
+      findOneAndUpdate: jest.fn().mockReturnValue(chain),
     };
 
     const service = createService(appointmentModel, {}, {}, {});
@@ -320,7 +320,7 @@ describe('AppointmentsService security', () => {
     };
     const appointmentModel = {
       findById: jest.fn().mockReturnValue(queryResolved(currentAppointment)),
-      findByIdAndUpdate: jest.fn().mockReturnValue(queryResolved(updatedAppointment)),
+      findOneAndUpdate: jest.fn().mockReturnValue(queryResolved(updatedAppointment)),
     };
     const emailService = {
       sendAppointmentCancelledEmail: jest.fn().mockRejectedValue(new Error('service unavailable')),
@@ -328,8 +328,8 @@ describe('AppointmentsService security', () => {
     const service = createService(appointmentModel, {}, {}, {}, emailService);
 
     await expect(service.update(appointmentId, { status: 'cancelled' }, 'user')).resolves.toBe(updatedAppointment);
-    expect(appointmentModel.findByIdAndUpdate).toHaveBeenCalledWith(
-      appointmentId,
+    expect(appointmentModel.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: appointmentId, status: currentAppointment.status },
       {
         $set: {
           status: 'cancelled',
@@ -379,7 +379,7 @@ describe('AppointmentsService security', () => {
     };
     const appointmentModel = {
       findById: jest.fn().mockReturnValue(queryResolved(currentAppointment)),
-      findByIdAndUpdate: jest.fn().mockReturnValue(queryResolved(updatedAppointment)),
+      findOneAndUpdate: jest.fn().mockReturnValue(queryResolved(updatedAppointment)),
     };
     const emailService = {
       sendAppointmentCancelledEmail: jest.fn().mockResolvedValue(undefined),
@@ -387,7 +387,7 @@ describe('AppointmentsService security', () => {
     const service = createService(appointmentModel, {}, {}, {}, emailService);
 
     await expect(service.update(appointmentId, { status: 'cancelled' }, 'admin')).resolves.toBe(updatedAppointment);
-    expect(appointmentModel.findByIdAndUpdate).toHaveBeenCalled();
+    expect(appointmentModel.findOneAndUpdate).toHaveBeenCalled();
     expect(emailService.sendAppointmentCancelledEmail).not.toHaveBeenCalled();
   });
 
@@ -404,15 +404,52 @@ describe('AppointmentsService security', () => {
     };
     const appointmentModel = {
       findById: jest.fn().mockReturnValue(queryResolved(currentAppointment)),
-      findByIdAndUpdate: jest.fn(),
+      findOneAndUpdate: jest.fn(),
     };
     const service = createService(appointmentModel, {}, {}, {});
 
     await expect(service.update(appointmentId, { status: 'pending' })).rejects.toThrow('Una reserva cancelada es definitiva y no puede modificarse.');
-    expect(appointmentModel.findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(appointmentModel.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['pending', 'completed', 'admin', '2026-08-10T14:00:00Z', 'no está permitido'],
+    ['confirmed', 'completed', 'admin', '2026-08-10T13:59:59Z', 'hora de inicio'],
+    ['confirmed', 'completed', 'user', '2026-08-10T14:00:00Z', 'Solo administración'],
+    ['confirmed', 'pending', 'admin', '2026-08-10T14:00:00Z', 'no está permitido'],
+    ['completed', 'confirmed', 'admin', '2026-08-10T14:00:00Z', 'completada es definitiva'],
+    ['completed', 'cancelled', 'admin', '2026-08-10T14:00:00Z', 'completada es definitiva'],
+    ['completed', 'completed', 'admin', '2026-08-10T14:00:00Z', 'completada es definitiva'],
+  ] as const)('rejects %s → %s by %s at %s', async (from, to, actor, now, message) => {
+    jest.useFakeTimers().setSystemTime(new Date(now));
+    const id = '507f1f77bcf86cd799439013';
+    const current = { _id: new Types.ObjectId(id), clientId: new Types.ObjectId('507f1f77bcf86cd799439011'), barberId: new Types.ObjectId('507f1f77bcf86cd799439012'), date: '2026-08-10', timeSlot: '10:00', status: from };
+    const model = { findById: jest.fn().mockReturnValue(queryResolved(current)), findOneAndUpdate: jest.fn() };
+    const service = createService(model);
+    await expect(service.update(id, { status: to }, actor)).rejects.toThrow(message);
+    expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each(['2026-08-10T14:00:00Z', '2026-08-11T14:00:00Z'])('allows completing exactly at start or later (%s)', async (now) => {
+    jest.useFakeTimers().setSystemTime(new Date(now));
+    const id = '507f1f77bcf86cd799439013';
+    const current = { _id: new Types.ObjectId(id), clientId: new Types.ObjectId('507f1f77bcf86cd799439011'), barberId: new Types.ObjectId('507f1f77bcf86cd799439012'), date: '2026-08-10', timeSlot: '10:00', status: 'confirmed' };
+    const updated = { ...current, status: 'completed' };
+    const model = { findById: jest.fn().mockReturnValue(queryResolved(current)), findOneAndUpdate: jest.fn().mockReturnValue(queryResolved(updated)) };
+    await expect(createService(model).update(id, { status: 'completed' }, 'admin')).resolves.toBe(updated);
+    expect(model.findOneAndUpdate).toHaveBeenCalledWith({ _id: id, status: 'confirmed' }, expect.any(Object), expect.any(Object));
+  });
+
+  it('rejects completing a reservation changed concurrently without overwriting its final state', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-11T14:00:00Z'));
+    const id = '507f1f77bcf86cd799439013';
+    const current = { _id: new Types.ObjectId(id), clientId: new Types.ObjectId('507f1f77bcf86cd799439011'), barberId: new Types.ObjectId('507f1f77bcf86cd799439012'), date: '2026-08-10', timeSlot: '10:00', status: 'confirmed' };
+    const model = { findById: jest.fn().mockReturnValue(queryResolved(current)), findOneAndUpdate: jest.fn().mockReturnValue(queryResolved(null)) };
+    await expect(createService(model).update(id, { status: 'completed' }, 'admin')).rejects.toThrow('cambió de estado');
   });
 
   it('keeps slotKey when an appointment is completed', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-10T14:00:00Z'));
     const appointmentId = '507f1f77bcf86cd799439013';
     const barberId = '507f1f77bcf86cd799439012';
     const currentAppointment = {
@@ -427,13 +464,13 @@ describe('AppointmentsService security', () => {
     const updatedAppointment = { ...currentAppointment, status: 'completed' };
     const appointmentModel = {
       findById: jest.fn().mockReturnValue(queryResolved(currentAppointment)),
-      findByIdAndUpdate: jest.fn().mockReturnValue(queryResolved(updatedAppointment)),
+      findOneAndUpdate: jest.fn().mockReturnValue(queryResolved(updatedAppointment)),
     };
     const service = createService(appointmentModel, {}, {}, {});
 
-    await expect(service.update(appointmentId, { status: 'completed' })).resolves.toBe(updatedAppointment);
-    expect(appointmentModel.findByIdAndUpdate).toHaveBeenCalledWith(
-      appointmentId,
+    await expect(service.update(appointmentId, { status: 'completed' }, 'admin')).resolves.toBe(updatedAppointment);
+    expect(appointmentModel.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: appointmentId, status: currentAppointment.status },
       {
         $set: {
           status: 'completed',
@@ -604,16 +641,16 @@ describe('AppointmentsService security', () => {
     const updated = { ...current, status: 'cancelled' };
     const model = {
       findById: jest.fn().mockReturnValue(queryResolved(current)),
-      findByIdAndUpdate: jest.fn().mockReturnValue(queryResolved(updated)),
+      findOneAndUpdate: jest.fn().mockReturnValue(queryResolved(updated)),
     };
     const service = createService(model);
     const result = service.update('507f1f77bcf86cd799439013', { status: 'cancelled' }, 'user');
     if (allowed) {
       await expect(result).resolves.toBe(updated);
-      expect(model.findByIdAndUpdate).toHaveBeenCalledTimes(1);
+      expect(model.findOneAndUpdate).toHaveBeenCalledTimes(1);
     } else {
       await expect(result).rejects.toThrow('al menos 12 horas');
-      expect(model.findByIdAndUpdate).not.toHaveBeenCalled();
+      expect(model.findOneAndUpdate).not.toHaveBeenCalled();
     }
   });
   it('rejects an inactive barber before querying its schedule', async () => {

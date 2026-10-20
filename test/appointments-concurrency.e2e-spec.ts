@@ -7,7 +7,7 @@ import { Appointment, AppointmentDocument, AppointmentSchema } from '../src/appo
 import { Barber, BarberSchema } from '../src/barbers/entities/barber.schema';
 import { BarberSchedule, BarberScheduleSchema } from '../src/barber-schedules/entities/barber-schedule.schema';
 import { User, UserRole, UserSchema } from '../src/users/schemas/user.schema';
-import { getSantiagoDateTime } from '../src/common/time/santiago-time';
+import { getSantiagoAppointmentTimestamp, getSantiagoDateTime } from '../src/common/time/santiago-time';
 
 // Uses only uniquely named temporary collections, never application collections.
 describe('Appointment concurrency against MongoDB', () => {
@@ -137,9 +137,23 @@ describe('Appointment concurrency against MongoDB', () => {
 
   it('releases the client key when completed but preserves the occupied slot', async () => {
     const first = await book(client, '09:00');
+    await service.update(first._id.toString(), { status: 'confirmed' }, 'admin');
+    jest.spyOn(Date, 'now').mockReturnValue(getSantiagoAppointmentTimestamp(date, '09:00'));
     await service.update(first._id.toString(), { status: 'completed' }, 'admin');
     await book(client, '10:00');
     await expect(book(otherClient, '09:00')).rejects.toThrow('This time slot is already occupied');
+  });
+
+  it('allows only one concurrent final transition from confirmed', async () => {
+    const first = await book(client, '09:00');
+    await service.update(first._id.toString(), { status: 'confirmed' }, 'admin');
+    jest.spyOn(Date, 'now').mockReturnValue(getSantiagoAppointmentTimestamp(date, '09:00'));
+    const results = await Promise.allSettled([service.update(first._id.toString(), { status: 'completed' }, 'admin'), service.update(first._id.toString(), { status: 'cancelled' }, 'admin')]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    const final = await appointments.findById(first._id).exec();
+    expect(['completed', 'cancelled']).toContain(final?.status);
+    await expect(service.update(first._id.toString(), { status: 'confirmed' }, 'admin')).rejects.toThrow('definitiva');
   });
 
   it('releases the old client key exactly at the start time without deleting history', async () => {
@@ -152,11 +166,13 @@ describe('Appointment concurrency against MongoDB', () => {
     expect(previous?.status).toBe('pending');
   });
 
-  it('rejects reactivating a completed reservation while another is active', async () => {
+  it('rejects reactivating a completed reservation even when another is active', async () => {
     const first = await book(client, '09:00');
+    await service.update(first._id.toString(), { status: 'confirmed' }, 'admin');
+    jest.spyOn(Date, 'now').mockReturnValue(getSantiagoAppointmentTimestamp(date, '09:00'));
     await service.update(first._id.toString(), { status: 'completed' }, 'admin');
     await book(client, '10:00');
-    await expect(service.update(first._id.toString(), { status: 'confirmed' }, 'admin')).rejects.toThrow('Ya tienes una reserva activa');
+    await expect(service.update(first._id.toString(), { status: 'confirmed' }, 'admin')).rejects.toThrow('Una reserva completada es definitiva');
   });
 
   it('keeps the client key when an admin reschedules the active reservation', async () => {
