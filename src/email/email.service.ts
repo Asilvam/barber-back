@@ -56,17 +56,17 @@ export class EmailService {
 
     await this.sendEmail({
       to: appointment.to,
-      subject: 'Confirmación de reserva',
+      subject: 'Reserva pendiente de aprobación',
       fromName,
       html: this.buildAppointmentEmail(appointment, {
-        preheader: 'Tu reserva fue creada correctamente.',
+        preheader: 'Recibimos tu solicitud de reserva; está pendiente de aprobación.',
         eyebrow: 'NUEVA RESERVA',
-        title: 'Tu cita quedó agendada',
-        introduction: 'Recibimos correctamente tu reserva. Guarda estos datos para el día de tu cita.',
-        statusLabel: 'RESERVA CREADA',
-        statusBackground: '#e7f2ee',
-        statusColor: '#245448',
-        noticeTitle: 'Todo listo',
+        title: 'Tu reserva está pendiente de aprobación',
+        introduction: 'Recibimos tu solicitud. La reserva está pendiente de aprobación por administración.',
+        statusLabel: 'PENDIENTE DE APROBACIÓN',
+        statusBackground: '#f9deeb',
+        statusColor: '#941251',
+        noticeTitle: 'Pendiente de aprobación',
         notice: 'Te avisaremos por este medio si administración realiza algún cambio en tu cita.',
       }),
     });
@@ -85,8 +85,8 @@ export class EmailService {
         title: 'Tu cita fue cancelada',
         introduction: 'Administración canceló la siguiente reserva asociada a tu cuenta.',
         statusLabel: 'RESERVA CANCELADA',
-        statusBackground: '#feeceb',
-        statusColor: '#9f2d28',
+        statusBackground: '#f9deeb',
+        statusColor: '#941251',
         noticeTitle: 'El horario fue liberado',
         notice: 'Puedes ingresar nuevamente a Barber y elegir otro bloque disponible cuando lo necesites.',
       }),
@@ -108,56 +108,55 @@ export class EmailService {
           <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
           <title>${this.escapeHtml(copy.title)}</title>
         </head>
-        <body style="margin: 0; padding: 0; background-color: #f3f5f4; color: #18201d;">
+        <body style="margin: 0; padding: 0; background-color: #f5f3f4; color: #1b191d;">
           <div style="display: none; max-height: 0; overflow: hidden; opacity: 0;">${this.escapeHtml(copy.preheader)}</div>
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; background-color: #f3f5f4;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; background-color: #f5f3f4;">
             <tr>
               <td align="center" style="padding: 32px 16px;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; max-width: 620px; background-color: #ffffff; border: 1px solid #dfe5e2; border-radius: 18px; overflow: hidden;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; max-width: 620px; background-color: #ffffff; border: 1px solid #e3dce1; border-radius: 18px; overflow: hidden;">
                   <tr>
-                    <td style="background-color: #2f6b5f; padding: 24px 32px;">
-                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                        <tr>
-                          <td style="font-family: Arial, Helvetica, sans-serif; color: #ffffff; font-size: 22px; font-weight: 700; letter-spacing: 0.4px;">${fromName}</td>
-                          <td align="right" style="font-family: Arial, Helvetica, sans-serif; color: #dcebe6; font-size: 12px; font-weight: 700; letter-spacing: 1.4px;">RESERVAS</td>
-                        </tr>
-                      </table>
+                    <td style="height: 6px; padding: 0; background-color: #c91470; font-size: 0; line-height: 0;">&nbsp;</td>
+                  </tr>
+                  <tr>
+                    <td style="background-color: #1b191d; padding: 24px 32px;">
+                      <p style="margin: 0 0 5px; font-family: Arial, Helvetica, sans-serif; color: #ffffff; font-size: 21px; font-weight: 800; letter-spacing: 0.3px;">${fromName}</p>
+                      <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; color: #f9deeb; font-size: 11px; font-weight: 700; letter-spacing: 2px;">RESERVAS · SHALO BARBER</p>
                     </td>
                   </tr>
                   <tr>
                     <td style="padding: 40px 32px 32px;">
-                      <p style="margin: 0 0 12px; font-family: Arial, Helvetica, sans-serif; color: #2f6b5f; font-size: 12px; font-weight: 700; letter-spacing: 1.5px;">${this.escapeHtml(copy.eyebrow)}</p>
-                      <h1 style="margin: 0 0 24px; font-family: Georgia, 'Times New Roman', serif; color: #18201d; font-size: 34px; line-height: 1.15; font-weight: 700;">${this.escapeHtml(copy.title)}</h1>
-                      <p style="margin: 0 0 12px; font-family: Arial, Helvetica, sans-serif; color: #27312d; font-size: 17px; line-height: 1.65;">Hola ${clientName},</p>
-                      <p style="margin: 0 0 28px; font-family: Arial, Helvetica, sans-serif; color: #4a5550; font-size: 16px; line-height: 1.65;">${this.escapeHtml(copy.introduction)}</p>
+                      <p style="margin: 0 0 12px; font-family: Arial, Helvetica, sans-serif; color: #c91470; font-size: 12px; font-weight: 800; letter-spacing: 1.8px;">${this.escapeHtml(copy.eyebrow)}</p>
+                      <h1 style="margin: 0 0 24px; font-family: Arial, Helvetica, sans-serif; color: #1b191d; font-size: 32px; line-height: 1.15; font-weight: 800;">${this.escapeHtml(copy.title)}</h1>
+                      <p style="margin: 0 0 12px; font-family: Arial, Helvetica, sans-serif; color: #1b191d; font-size: 17px; line-height: 1.65;">Hola ${clientName},</p>
+                      <p style="margin: 0 0 28px; font-family: Arial, Helvetica, sans-serif; color: #5e5961; font-size: 16px; line-height: 1.65;">${this.escapeHtml(copy.introduction)}</p>
                       <span style="display: inline-block; margin-bottom: 18px; padding: 7px 12px; border-radius: 999px; background-color: ${copy.statusBackground}; color: ${copy.statusColor}; font-family: Arial, Helvetica, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 1px;">${this.escapeHtml(copy.statusLabel)}</span>
-                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; background-color: #f7f9f8; border: 1px solid #e5eae7; border-radius: 12px;">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; background-color: #f5f3f4; border: 1px solid #e3dce1; border-radius: 12px;">
                         <tr>
-                          <td style="padding: 22px 24px; border-bottom: 1px solid #e5eae7; font-family: Arial, Helvetica, sans-serif; color: #66716c; font-size: 13px; width: 32%;">FECHA</td>
-                          <td style="padding: 22px 24px; border-bottom: 1px solid #e5eae7; font-family: Arial, Helvetica, sans-serif; color: #18201d; font-size: 16px; font-weight: 700;">${date}</td>
+                          <td style="padding: 18px 20px; border-bottom: 1px solid #e3dce1; font-family: Arial, Helvetica, sans-serif; color: #5e5961; font-size: 12px; font-weight: 700; letter-spacing: 0.8px; width: 32%;">FECHA</td>
+                          <td style="padding: 18px 20px; border-bottom: 1px solid #e3dce1; font-family: Arial, Helvetica, sans-serif; color: #1b191d; font-size: 16px; font-weight: 700;">${date}</td>
                         </tr>
                         <tr>
-                          <td style="padding: 22px 24px; border-bottom: 1px solid #e5eae7; font-family: Arial, Helvetica, sans-serif; color: #66716c; font-size: 13px;">HORA</td>
-                          <td style="padding: 22px 24px; border-bottom: 1px solid #e5eae7; font-family: Arial, Helvetica, sans-serif; color: #18201d; font-size: 16px; font-weight: 700;">${timeSlot}</td>
+                          <td style="padding: 18px 20px; border-bottom: 1px solid #e3dce1; font-family: Arial, Helvetica, sans-serif; color: #5e5961; font-size: 12px; font-weight: 700; letter-spacing: 0.8px;">HORA</td>
+                          <td style="padding: 18px 20px; border-bottom: 1px solid #e3dce1; font-family: Arial, Helvetica, sans-serif; color: #1b191d; font-size: 16px; font-weight: 700;">${timeSlot}</td>
                         </tr>
                         <tr>
-                          <td style="padding: 22px 24px; font-family: Arial, Helvetica, sans-serif; color: #66716c; font-size: 13px;">BARBERO</td>
-                          <td style="padding: 22px 24px; font-family: Arial, Helvetica, sans-serif; color: #18201d; font-size: 16px; font-weight: 700;">${barberName}</td>
+                          <td style="padding: 18px 20px; font-family: Arial, Helvetica, sans-serif; color: #5e5961; font-size: 12px; font-weight: 700; letter-spacing: 0.8px;">BARBERO</td>
+                          <td style="padding: 18px 20px; font-family: Arial, Helvetica, sans-serif; color: #1b191d; font-size: 16px; font-weight: 700;">${barberName}</td>
                         </tr>
                       </table>
-                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; margin-top: 24px; border-left: 4px solid #2f6b5f; background-color: #f1f6f4;">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; margin-top: 24px; border-left: 4px solid #c91470; background-color: #f9deeb;">
                         <tr>
                           <td style="padding: 18px 20px;">
-                            <p style="margin: 0 0 5px; font-family: Arial, Helvetica, sans-serif; color: #244e45; font-size: 14px; font-weight: 700;">${this.escapeHtml(copy.noticeTitle)}</p>
-                            <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; color: #52605a; font-size: 14px; line-height: 1.55;">${this.escapeHtml(copy.notice)}</p>
+                            <p style="margin: 0 0 5px; font-family: Arial, Helvetica, sans-serif; color: #941251; font-size: 14px; font-weight: 700;">${this.escapeHtml(copy.noticeTitle)}</p>
+                            <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; color: #5e5961; font-size: 14px; line-height: 1.55;">${this.escapeHtml(copy.notice)}</p>
                           </td>
                         </tr>
                       </table>
                     </td>
                   </tr>
                   <tr>
-                    <td style="padding: 22px 32px; background-color: #18201d;">
-                      <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; color: #d7dedb; font-size: 12px; line-height: 1.6;">Mensaje automático de ${fromName}. No respondas a este correo.</p>
+                    <td style="padding: 22px 32px; background-color: #1b191d;">
+                      <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; color: #f5f3f4; font-size: 12px; line-height: 1.6;">Mensaje automático de ${fromName}. No respondas a este correo.</p>
                     </td>
                   </tr>
                 </table>

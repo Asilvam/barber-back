@@ -61,7 +61,7 @@ describe('EmailService', () => {
     ).rejects.toThrow('Email service request failed: 503 Request failed with status code 503');
   });
 
-  it('builds an escaped appointment confirmation email', async () => {
+  it('builds an escaped pending-approval appointment email', async () => {
     const service = new EmailService(config);
     const sendEmail = jest.spyOn(service, 'sendEmail').mockResolvedValue();
 
@@ -76,14 +76,24 @@ describe('EmailService', () => {
     expect(sendEmail).toHaveBeenCalledTimes(1);
     const message = sendEmail.mock.calls[0][0];
     expect(message.to).toBe('client@example.com');
-    expect(message.subject).toBe('Confirmación de reserva');
+    expect(message.subject).toBe('Reserva pendiente de aprobación');
     expect(message.fromName).toBe('Barber Test');
     expect(message.html).toContain('&lt;Client&gt;');
     expect(message.html).toContain('Tom &amp; Jerry');
     expect(message.html).toContain('10-08-2026');
-    expect(message.html).toContain('Tu cita quedó agendada');
-    expect(message.html).toContain('RESERVA CREADA');
-    expect(message.html).toContain('background-color: #2f6b5f');
+    expect(message.html).toContain('Tu reserva está pendiente de aprobación');
+    expect(message.html).toContain('PENDIENTE DE APROBACIÓN');
+    expect(message.html).toContain('background-color: #1b191d');
+    expect(message.html).toContain('background-color: #c91470');
+    expect(message.html).toContain('background-color: #f9deeb');
+    expect(message.html).toContain('color: #941251');
+    expect(message.html).toContain('background-color: #f5f3f4');
+    expect(message.html).toContain('FECHA');
+    expect(message.html).toContain('HORA');
+    expect(message.html).toContain('BARBERO');
+    expect(message.html).not.toContain('#2f6b5f');
+    expect(message.html).not.toContain('#e7f2ee');
+    expect(message.html).not.toContain('#245448');
   });
 
   it('builds an appointment cancellation email', async () => {
@@ -105,5 +115,12 @@ describe('EmailService', () => {
     expect(message.html).toContain('RESERVA CANCELADA');
     expect(message.html).toContain('Administración canceló');
     expect(message.html).toContain('El horario fue liberado');
+    expect(message.html).toContain('background-color: #1b191d');
+    expect(message.html).toContain('background-color: #c91470');
+    expect(message.html).toContain('background-color: #f9deeb');
+    expect(message.html).toContain('color: #941251');
+    expect(message.html).not.toContain('#2f6b5f');
+    expect(message.html).not.toContain('#feeceb');
+    expect(message.html).not.toContain('#9f2d28');
   });
 });
