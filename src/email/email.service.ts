@@ -72,6 +72,25 @@ export class EmailService {
     });
   }
 
+  async sendAppointmentConfirmedEmail(appointment: AppointmentEmail): Promise<void> {
+    await this.sendEmail({
+      to: appointment.to,
+      subject: 'Tu reserva está confirmada',
+      fromName: this.configService.get<string>('EMAIL_FROM_NAME', 'Barber'),
+      html: this.buildAppointmentEmail(appointment, {
+        preheader: 'Administración confirmó tu reserva.',
+        eyebrow: 'RESERVA CONFIRMADA',
+        title: 'Tu cita está confirmada',
+        introduction: 'Administración aprobó tu reserva. Te esperamos en la fecha y hora indicadas.',
+        statusLabel: 'CONFIRMADA',
+        statusBackground: '#e6f3ec',
+        statusColor: '#23634c',
+        noticeTitle: 'Te esperamos',
+        notice: 'Si necesitas cancelar, recuerda hacerlo con al menos 12 horas de anticipación.',
+      }),
+    });
+  }
+
   async sendAppointmentCancelledEmail(appointment: AppointmentEmail): Promise<void> {
     const fromName = this.configService.get<string>('EMAIL_FROM_NAME', 'Barber');
 

@@ -61,6 +61,19 @@ describe('EmailService', () => {
     ).rejects.toThrow('Email service request failed: 503 Request failed with status code 503');
   });
 
+  it('sends confirmed details and escapes client and barber names', async () => {
+    const service = new EmailService(config);
+    const send = jest.spyOn(service, 'sendEmail').mockResolvedValue(undefined);
+    await service.sendAppointmentConfirmedEmail({ to: 'client@example.com', clientName: '<Client>', barberName: 'Barber & Co', date: '2026-08-10', timeSlot: '10:00' });
+    const message = send.mock.calls[0][0];
+    expect(message.subject).toBe('Tu reserva está confirmada');
+    expect(message.html).toContain('&lt;Client&gt;');
+    expect(message.html).toContain('Barber &amp; Co');
+    expect(message.html).toContain('10-08-2026');
+    expect(message.html).toContain('10:00');
+    expect(message.html).toContain('CONFIRMADA');
+  });
+
   it('builds an escaped pending-approval appointment email', async () => {
     const service = new EmailService(config);
     const sendEmail = jest.spyOn(service, 'sendEmail').mockResolvedValue();

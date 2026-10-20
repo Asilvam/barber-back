@@ -30,20 +30,26 @@ export class User {
   role: UserRole;
 
   @Prop({ default: false })
+  isBookingBlocked: boolean;
+
+  @Prop({ type: [{ blocked: Boolean, reason: String, actorId: String, actorName: String, at: Date }], default: [], select: false })
+  bookingAccessHistory: { blocked: boolean; reason: string; actorId: string; actorName: string; at: Date }[];
+
+  @Prop({ default: false })
   emailVerified: boolean;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
 
 UserSchema.set('toJSON', {
-  transform: (_, ret: any) => {
+  transform: (_, ret: Partial<User>) => {
     delete ret.passwordHash;
     return ret;
   },
 });
 
 UserSchema.set('toObject', {
-  transform: (_, ret: any) => {
+  transform: (_, ret: Partial<User>) => {
     delete ret.passwordHash;
     return ret;
   },

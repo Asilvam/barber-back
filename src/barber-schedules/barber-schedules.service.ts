@@ -5,7 +5,13 @@ import { BarberSchedule, BarberScheduleDocument } from './entities/barber-schedu
 import { Appointment, AppointmentDocument } from '../appointments/entities/appointment.schema';
 import { CreateBarberScheduleDto } from './dto/create-barber-schedule.dto';
 import { UpdateBarberScheduleDto } from './dto/update-barber-schedule.dto';
-import { Barber } from '../barbers/entities/barber.schema'; // Para validar que el barbero existe
+import { Barber, BarberDocument } from '../barbers/entities/barber.schema'; // Para validar que el barbero existe
+
+export interface BarberAvailability {
+  barberId: string;
+  barberName: string | undefined;
+  slots: { date: string; timeSlot: string }[];
+}
 
 @Injectable()
 export class BarberSchedulesService {
@@ -84,7 +90,7 @@ export class BarberSchedulesService {
   }
 
   // New method: getAvailability for a date range
-  async getAvailability(start: string, end: string): Promise<any> {
+  async getAvailability(start: string, end: string): Promise<BarberAvailability[]> {
     // Validate date strings (basic)
     if (!start || !end) {
       throw new BadRequestException('Both start and end query parameters are required.');
@@ -94,17 +100,17 @@ export class BarberSchedulesService {
       .find({
         date: { $gte: start, $lte: end },
       })
-      .populate('barberId')
+      .populate<{ barberId: BarberDocument | Types.ObjectId }>('barberId')
       .exec();
     // Group by barber
-    const availabilityMap: Record<string, any> = {};
+    const availabilityMap: Record<string, BarberAvailability> = {};
     appointments.forEach((appt) => {
-      const barberId = (appt.barberId as any)._id?.toString() || (appt.barberId as any).toString();
-      const barberName = (appt.barberId as any).name;
+      const barberId = appt.barberId._id?.toString() || (appt.barberId as { toString(): string }).toString();
+      const barberName = appt.barberId instanceof Types.ObjectId ? undefined : appt.barberId.name;
       if (!availabilityMap[barberId]) {
         availabilityMap[barberId] = { barberId, barberName, slots: [] };
       }
-      availabilityMap[barberId].slots.push({ date: appt.date, timeSlot: (appt as any).timeSlot });
+      availabilityMap[barberId].slots.push({ date: appt.date, timeSlot: appt.timeSlot });
     });
     // Return array of barbers with busy slots; front‑end can compute free slots.
     return Object.values(availabilityMap);

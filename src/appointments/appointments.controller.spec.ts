@@ -1,5 +1,8 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { AppointmentsController } from './appointments.controller';
+import type { AppointmentsService } from './appointments.service';
+
+type AuthenticatedRequest = Parameters<AppointmentsController['findOne']>[1];
 import { UserRole } from '../users/schemas/user.schema';
 
 describe('AppointmentsController security', () => {
@@ -12,7 +15,7 @@ describe('AppointmentsController security', () => {
     getAvailableSlots: jest.fn(),
   };
 
-  const controller = new AppointmentsController(appointmentsService as any);
+  const controller = new AppointmentsController(appointmentsService as unknown as AppointmentsService);
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -24,7 +27,7 @@ describe('AppointmentsController security', () => {
     await expect(
       controller.findOne('a1', {
         user: { userId: 'other-user-id', role: UserRole.USER, email: 'u@test.com' },
-      } as any),
+      } as AuthenticatedRequest),
     ).rejects.toThrow(ForbiddenException);
   });
 
@@ -35,7 +38,7 @@ describe('AppointmentsController security', () => {
     await expect(
       controller.findOne('a1', {
         user: { userId: 'owner-id', role: UserRole.USER, email: 'u@test.com' },
-      } as any),
+      } as AuthenticatedRequest),
     ).resolves.toEqual(appointment);
   });
 
@@ -46,7 +49,7 @@ describe('AppointmentsController security', () => {
     await expect(
       controller.findOne('a1', {
         user: { userId: 'admin-id', role: UserRole.ADMIN, email: 'admin@test.com' },
-      } as any),
+      } as AuthenticatedRequest),
     ).resolves.toEqual(appointment);
   });
 
@@ -61,7 +64,7 @@ describe('AppointmentsController security', () => {
     await expect(
       controller.cancelMyAppointment('a1', {
         user: { userId: 'owner-id', role: UserRole.USER, email: 'u@test.com' },
-      } as any),
+      } as AuthenticatedRequest),
     ).resolves.toEqual({ id: 'a1', status: 'cancelled' });
 
     expect(appointmentsService.update).toHaveBeenCalledWith('a1', { status: 'cancelled' }, 'user');
@@ -93,7 +96,7 @@ describe('AppointmentsController security', () => {
     await expect(
       controller.cancelMyAppointment('a1', {
         user: { userId: 'other-user-id', role: UserRole.USER, email: 'u@test.com' },
-      } as any),
+      } as AuthenticatedRequest),
     ).rejects.toThrow(ForbiddenException);
   });
 
@@ -107,7 +110,7 @@ describe('AppointmentsController security', () => {
     await expect(
       controller.cancelMyAppointment('a1', {
         user: { userId: 'owner-id', role: UserRole.USER, email: 'u@test.com' },
-      } as any),
+      } as AuthenticatedRequest),
     ).rejects.toThrow(ConflictException);
   });
 });

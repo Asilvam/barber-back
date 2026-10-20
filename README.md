@@ -21,21 +21,29 @@ NestJS backend with local and Google auth, JWT, MongoDB, and Swagger docs.
 
 ## Requirements
 
-- Node 22 (`.nvmrc`)
+- Node.js 24.22.0 (`.nvmrc`); the supported major version is 24.x.
+- npm 11.x (validated with 11.19.1).
+- nvm to select the version specified by the project.
 - MongoDB
 
 ## Setup
 
 ```bash
-npm install
+nvm install
+nvm use
+npm ci
 ```
+
+Run these commands from the repository root. `npm ci` installs the versions in
+`package-lock.json`; use `npm install` when intentionally changing dependencies.
+The reviewed dependency install-script decisions are stored in `allowScripts`
+in `package.json`.
 
 Create a `.env` in the project root:
 
 ```env
 MONGODB_URI=mongodb://localhost:27017/barber
 GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_id
 JWT_SECRET=replace_with_a_strong_secret
 JWT_EXPIRES_IN=1d
 CORS_ORIGIN=http://localhost:5173
@@ -67,19 +75,74 @@ Notes:
 
 ## Appointment lifecycle
 
-- Creating an appointment assigns an internal `slotKey` and sends a confirmation email.
+- Creating an appointment assigns an internal `slotKey` and sends a pending-approval email.
 - Changing an active appointment to `cancelled` removes its `slotKey`, releases the block, and emails the client.
 - Cancelling an expired appointment does not send email.
 - `completed` appointments retain their `slotKey`; expired blocks cannot be booked again.
-- Email delivery failures are logged and never roll back appointment creation or cancellation.
+- Email delivery failures are logged and never roll back appointment creation, confirmation, or cancellation.
 - `DELETE /appointments/:id` permanently deletes the record and does not send a cancellation email.
 - Appointment expiration is evaluated in the `America/Santiago` timezone.
+
+## Active reservation concurrency
+
+`activeClientKey` is an internal, uniquely indexed field. Future pending or
+confirmed reservations hold this key for non-admin clients. Cancellation and
+completion remove it; a new booking also releases keys for appointments that
+have reached their start time. `slotKey` independently protects each barber slot.
+Conflicts return HTTP 409. Administrators retain their multiple-reservation exception.
+
+For an existing database, pause booking writes while running the migration.
+It uses `MONGODB_URI` from the environment or `.env` and never deletes reservations:
+
+```bash
+npm run build
+# Inspect only; duplicates or orphaned clients prevent application
+node dist/appointments/migrate-active-client-key.js
+# Apply only after reviewing the diagnostic result
+node dist/appointments/migrate-active-client-key.js --apply
+```
+
+MongoDB integration tests use uniquely named `qa_booking_` collections and remove
+only those collections afterwards. They use `BARBER_TEST_MONGODB_URI`, or fall back
+to `MONGODB_URI`. They do not send email. Run only the concurrency suite with:
+
+```bash
+npm run test:e2e -- --runInBand --testPathPatterns=appointments-concurrency
+```
+
+The latest concurrency run passed 8 integration tests, including simultaneous
+requests synchronized after their initial availability checks.
 
 ## Run
 
 ```bash
 npm run start:dev
 ```
+
+## Verification
+
+```bash
+# Static analysis without modifying files
+npx --no-install eslint "{src,apps,libs,test}/**/*.ts" --max-warnings 0
+
+# Compile the application
+npm run build
+
+# Unit tests
+npm test -- --runInBand
+
+# Dependency security advisories
+npm audit
+```
+
+`npm run lint` includes `--fix` and can modify source files; use the command above
+for a read-only check. The latest unit-test run passed 54 tests across 8 suites.
+Date-sensitive appointment tests use a controlled clock. Unit tests use mocks;
+they do not establish that a deployed database or email service is reachable.
+
+The latest dependency audit reported 0 vulnerabilities. Audit results can change
+as new advisories are published. Clean installations may still report deprecation
+warnings from transitive dependencies; these are distinct from audit findings.
 
 ## Swagger
 
@@ -262,3 +325,14 @@ the client by email. Expired appointments do not trigger email.
 #### `DELETE /appointments/:id` (Admin Only)
 Delete an appointment.
 Response: `Appointment`
+
+### Client booking access and confirmation notifications
+
+- `GET /clients` is restricted to administrators and lists clients (`role=user`) with their access history.
+- `PATCH /clients/:id/booking-access` accepts `{ "blocked": true, "reason": "Motivo interno" }`. To unblock, send `blocked: false` with a reason. Reasons are trimmed, required, and limited to 500 characters.
+- Each change atomically records the administrator ID, name, date, action, and reason. Repeating a stale change returns 409 rather than appending duplicate history. Administrators and barbers cannot be blocked through this endpoint.
+- `isBookingBlocked` defaults to false for existing users. Internal reasons and access history are excluded from ordinary user queries (`select: false`). No data migration is required.
+- Blocked clients receive 403 with code `CLIENT_BOOKING_BLOCKED` when creating a reservation, including through existing sessions. Existing reservations remain available for viewing and cancellation under the existing rules. Blocking sends no email.
+- A `pending` → `confirmed` transition sends the client a confirmation email with barber, date, time, and confirmed status. The database update checks that the reservation is still pending so concurrent confirmations cannot both trigger the email. Saving an already confirmed reservation does not resend it.
+- Delivery uses the existing email service. Failures are logged without reverting the confirmed reservation; no retry queue is implemented.
+- Client access HTTP tests use mocked services and no database or email: `npx jest --config ./test/jest-e2e.json --runInBand client-access`.

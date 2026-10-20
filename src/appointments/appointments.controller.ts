@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Req, Logger, ForbiddenException, ConflictException } from '@nestjs/common'; // Importamos Logger
 import { AppointmentsService } from './appointments.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
+import { AvailabilityQueryDto } from './dto/availability-query.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -46,7 +47,8 @@ export class AppointmentsController {
 
   @Get('availability')
   @ApiOperation({ summary: 'Consultar horarios disponibles de un barbero' })
-  getAvailability(@Query('barberId') barberId: string, @Query('date') date: string) {
+  getAvailability(@Query() query: AvailabilityQueryDto) {
+    const { barberId, date } = query;
     this.logger.log(`Received request for availability for barber ${barberId} on ${date}.`);
     return this.appointmentsService.getAvailableSlots(barberId, date);
   }

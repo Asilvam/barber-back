@@ -1,13 +1,33 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { User, UserDocument } from './schemas/user.schema';
+import { Model, Types } from 'mongoose';
+import { User, UserDocument, UserRole } from './schemas/user.schema';
 import { UpdateUserDto } from './dto/update-user.dto'; // Import UpdateUserDto
 
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
   constructor(@InjectModel(User.name) private userModel: Model<UserDocument>) {}
+
+  findClients() {
+    return this.userModel.find({ role: UserRole.USER }).select('+bookingAccessHistory').sort({ name: 1 }).exec();
+  }
+
+  async setBookingAccess(id: string, blocked: boolean, reason: string, actorId: string) {
+    if (!Types.ObjectId.isValid(id)) throw new BadRequestException('Cliente inválido');
+    const actor = await this.userModel.findById(actorId).exec();
+    if (!actor || actor.role !== UserRole.ADMIN) throw new ForbiddenException('Administrador inválido');
+    const client = await this.userModel
+      .findOneAndUpdate(
+        { _id: id, role: UserRole.USER, isBookingBlocked: blocked ? { $ne: true } : true },
+        { $set: { isBookingBlocked: blocked }, $push: { bookingAccessHistory: { blocked, reason, actorId, actorName: actor.name, at: new Date() } } },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .select('+bookingAccessHistory')
+      .exec();
+    if (!client) throw new ConflictException('El cliente no existe o su estado ya cambió. Actualiza la lista.');
+    return client;
+  }
 
   findByEmail(email: string) {
     this.logger.debug(`Find by email email=${email}`);

@@ -39,3 +39,17 @@ export function minutesToTime(totalMinutes: number): string {
   const minutes = totalMinutes % 60;
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
 }
+
+// Resolve a Santiago wall-clock appointment time without assuming a fixed UTC offset.
+export function getSantiagoAppointmentTimestamp(date: string, time: string): number {
+  const wallClock = Date.parse(`${date}T${time}:00Z`);
+  let timestamp = wallClock;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const local = getSantiagoDateTime(new Date(timestamp));
+    const observed = Date.parse(`${local.today}T${local.currentTime}:00Z`);
+    const correction = wallClock - observed;
+    if (correction === 0) return timestamp;
+    timestamp += correction;
+  }
+  throw new RangeError('La hora no existe en la zona horaria de Santiago.');
+}

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common'; // Importar Logger
+import { ForbiddenException, Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common'; // Importar Logger
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
 import { Model, Types } from 'mongoose';
@@ -7,12 +7,7 @@ import { User, UserRole } from '../users/schemas/user.schema';
 import { Appointment, AppointmentDocument } from './entities/appointment.schema';
 import { Barber } from '../barbers/entities/barber.schema';
 import { BarberSchedule } from '../barber-schedules/entities/barber-schedule.schema';
-import {
-  BUSINESS_TIME_ZONE,
-  getSantiagoDateTime,
-  minutesToTime,
-  timeToMinutes,
-} from '../common/time/santiago-time';
+import { BUSINESS_TIME_ZONE, getSantiagoDateTime, getSantiagoAppointmentTimestamp, minutesToTime, timeToMinutes } from '../common/time/santiago-time';
 import { EmailService } from '../email/email.service';
 
 @Injectable()
@@ -29,6 +24,34 @@ export class AppointmentsService {
 
   private isMongoDuplicateKeyError(error: unknown): boolean {
     return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 11000;
+  }
+
+  private isActiveClientDuplicate(error: unknown): boolean {
+    if (!this.isMongoDuplicateKeyError(error)) return false;
+    const duplicate = error as { keyPattern?: Record<string, unknown>; message?: string };
+    return duplicate.keyPattern?.activeClientKey !== undefined || Boolean(duplicate.message?.includes('unique_active_client_key'));
+  }
+
+  private activeClientConflict() {
+    return new ConflictException('Ya tienes una reserva activa. Puedes reservar nuevamente cuando comience tu cita actual o si la cancelas con al menos 12 horas de anticipación.');
+  }
+
+  private occupiesClientKey(date: string, timeSlot: string, status: string) {
+    const { today, currentTime } = this.getAppointmentCutoff();
+    return ['pending', 'confirmed'].includes(status) && (date > today || (date === today && timeSlot > currentTime));
+  }
+
+  private async releaseExpiredClientKeys(clientId: string) {
+    const { today, currentTime } = this.getAppointmentCutoff();
+    await this.appointmentModel
+      .updateMany(
+        {
+          activeClientKey: clientId,
+          $or: [{ date: { $lt: today } }, { date: today, timeSlot: { $lte: currentTime } }, { status: { $nin: ['pending', 'confirmed'] } }],
+        },
+        { $unset: { activeClientKey: 1 } },
+      )
+      .exec();
   }
 
   private buildSlotKey(barberId: string, date: string, timeSlot: string): string {
@@ -51,13 +74,7 @@ export class AppointmentsService {
     if (typeof value === 'object') {
       const record = value as Record<string, unknown>;
       const rawId = record._id;
-      const id = rawId instanceof Types.ObjectId
-        ? rawId.toString()
-        : typeof rawId === 'string'
-          ? rawId
-          : typeof value.toString === 'function'
-            ? value.toString()
-            : undefined;
+      const id = rawId instanceof Types.ObjectId ? rawId.toString() : typeof rawId === 'string' ? rawId : typeof value.toString === 'function' ? (value as { toString(): string }).toString() : undefined;
 
       return {
         id,
@@ -68,7 +85,8 @@ export class AppointmentsService {
       };
     }
 
-    return { id: String(value) };
+    const printable = value as { toString(): string };
+    return { id: String(printable) };
   }
 
   private formatAppointmentForLog(appointment: AppointmentDocument) {
@@ -111,10 +129,7 @@ export class AppointmentsService {
 
     if (!date) {
       return {
-        $or: [
-          { date: { $gt: today } },
-          { date: today, timeSlot: { $gte: currentTime } },
-        ],
+        $or: [{ date: { $gt: today } }, { date: today, timeSlot: { $gte: currentTime } }],
       };
     }
 
@@ -134,13 +149,33 @@ export class AppointmentsService {
   }
 
   private getNonExpiredActiveAppointmentFilter(clientId: string) {
-    const dateTimeFilter = this.getNonExpiredDateTimeFilter();
-
+    const { today, currentTime } = this.getAppointmentCutoff();
     return {
       clientId: new Types.ObjectId(clientId),
       status: { $in: ['pending', 'confirmed'] },
-      ...dateTimeFilter,
+      $or: [{ date: { $gt: today } }, { date: today, timeSlot: { $gt: currentTime } }],
     };
+  }
+
+  private validateClientBookingWindow(date: string) {
+    const { today } = this.getAppointmentCutoff();
+    const limit = new Date(`${today}T00:00:00Z`);
+    limit.setUTCDate(limit.getUTCDate() + 7);
+    if (date > limit.toISOString().slice(0, 10)) {
+      throw new ConflictException('Solo puedes reservar hasta 7 días hacia adelante.');
+    }
+  }
+
+  private getScheduleSlots(schedule: Pick<BarberSchedule, 'workingHours' | 'breakTimes'>): string[] {
+    const slots: string[] = [];
+    for (const hours of schedule.workingHours) {
+      const end = timeToMinutes(hours.end);
+      for (let start = timeToMinutes(hours.start); start + 60 <= end; start += 60) {
+        const crossesBreak = schedule.breakTimes.some((pause) => start < timeToMinutes(pause.end) && start + 60 > timeToMinutes(pause.start));
+        if (!crossesBreak) slots.push(minutesToTime(start));
+      }
+    }
+    return slots;
   }
 
   private getNonExpiredBarberAppointmentFilter(barberId: string, date: string, timeSlot?: string) {
@@ -163,6 +198,9 @@ export class AppointmentsService {
       this.logger.warn(`Barber with ID ${barberId} not found during appointment validation.`);
       throw new NotFoundException(`Barber with ID ${barberId} not found`);
     }
+    if (!barber.isActive) {
+      throw new ConflictException('El barbero está inactivo y no puede recibir nuevas reservas.');
+    }
     this.logger.debug(`Barber ${barberId} found.`);
 
     const schedule = await this.barberScheduleModel.findOne({ barberId, date }).exec();
@@ -172,33 +210,9 @@ export class AppointmentsService {
     }
     this.logger.debug(`Schedule found for barber ${barberId} on ${date}.`);
 
-    const slotMinutes = timeToMinutes(timeSlot);
-    let isWorkingHour = false;
-
-    for (const wh of schedule.workingHours) {
-      const startMinutes = timeToMinutes(wh.start);
-      const endMinutes = timeToMinutes(wh.end);
-      if (slotMinutes >= startMinutes && slotMinutes < endMinutes) {
-        isWorkingHour = true;
-        break;
-      }
+    if (!this.getScheduleSlots(schedule).includes(timeSlot)) {
+      throw new ConflictException('Time slot is not an available 60-minute block in the barber schedule');
     }
-
-    if (!isWorkingHour) {
-      this.logger.warn(`Time slot ${timeSlot} is outside of barber ${barberId}'s working hours on ${date}.`);
-      throw new ConflictException(`Time slot ${timeSlot} is outside of barber's working hours on ${date}`);
-    }
-    this.logger.debug(`Time slot ${timeSlot} is within working hours.`);
-
-    for (const bt of schedule.breakTimes) {
-      const startMinutes = timeToMinutes(bt.start);
-      const endMinutes = timeToMinutes(bt.end);
-      if (slotMinutes >= startMinutes && slotMinutes < endMinutes) {
-        this.logger.warn(`Time slot ${timeSlot} is during barber ${barberId}'s break time on ${date}.`);
-        throw new ConflictException(`Time slot ${timeSlot} is during barber's break time on ${date}`);
-      }
-    }
-    this.logger.debug(`Time slot ${timeSlot} is not during break time.`);
     return barber;
   }
 
@@ -212,11 +226,16 @@ export class AppointmentsService {
       this.logger.warn(`Client with ID ${clientId} not found during appointment creation.`);
       throw new NotFoundException(`Client with ID ${clientId} not found`);
     }
+    if (client.isBookingBlocked) {
+      throw new ForbiddenException({ code: 'CLIENT_BOOKING_BLOCKED', message: 'Tu cuenta no está habilitada para realizar nuevas reservas. Contacta con la barbería.' });
+    }
     this.logger.debug(`Client ${clientId} found.`);
 
     // 2. Los clientes tienen una sola reserva activa; los administradores pueden
     // crear varias a su nombre mientras el bloque solicitado siga disponible.
     if (client.role !== UserRole.ADMIN) {
+      this.validateClientBookingWindow(date);
+      await this.releaseExpiredClientKeys(clientId);
       const existingActiveAppointment = await this.appointmentModel
         .findOne(this.getNonExpiredActiveAppointmentFilter(clientId))
         .populate('barberId')
@@ -224,7 +243,7 @@ export class AppointmentsService {
         .exec();
       if (existingActiveAppointment) {
         this.logger.warn(`Client ${clientId} already has an active appointment: ${JSON.stringify(this.formatAppointmentForLog(existingActiveAppointment))}.`);
-        throw new ConflictException('Ya tienes una reserva activa. Debes completar o cancelar tu cita actual antes de programar una nueva.');
+        throw this.activeClientConflict();
       }
       this.logger.debug(`Client ${clientId} has no non-expired active appointments.`);
     } else {
@@ -239,9 +258,7 @@ export class AppointmentsService {
 
     // 5. Check if the slot is already booked
     const slotConflictFilter = this.getNonExpiredBarberAppointmentFilter(barberId, date, timeSlot);
-    const existingAppointment = slotConflictFilter
-      ? await this.appointmentModel.findOne(slotConflictFilter).exec()
-      : null;
+    const existingAppointment = slotConflictFilter ? await this.appointmentModel.findOne(slotConflictFilter).exec() : null;
 
     if (existingAppointment) {
       this.logger.warn(`Time slot ${timeSlot} for barber ${barberId} on ${date} is already occupied.`);
@@ -253,11 +270,13 @@ export class AppointmentsService {
       ...createAppointmentDto,
       clientId: new Types.ObjectId(clientId),
       slotKey: this.buildSlotKey(barberId, date, timeSlot),
+      ...(client.role !== UserRole.ADMIN && this.occupiesClientKey(date, timeSlot, 'pending') ? { activeClientKey: clientId } : {}),
     });
     let savedAppointment: AppointmentDocument;
     try {
       savedAppointment = await createdAppointment.save();
     } catch (error) {
+      if (this.isActiveClientDuplicate(error)) throw this.activeClientConflict();
       if (this.isMongoDuplicateKeyError(error)) {
         this.logger.warn(`Duplicate appointment detected at persistence layer for barber ${barberId} on ${date} ${timeSlot}.`);
         throw new ConflictException('This time slot is already occupied');
@@ -290,12 +309,7 @@ export class AppointmentsService {
 
   async findAll() {
     this.logger.debug('Finding all appointments.');
-    return await this.appointmentModel
-      .find()
-      .populate('barberId')
-      .populate('clientId', '_id name email role provider emailVerified createdAt updatedAt')
-      .sort({ date: -1, timeSlot: -1 })
-      .exec();
+    return await this.appointmentModel.find().populate('barberId').populate('clientId', '_id name email role provider emailVerified createdAt updatedAt').sort({ date: -1, timeSlot: -1 }).exec();
   }
 
   async findOne(id: string) {
@@ -305,11 +319,7 @@ export class AppointmentsService {
       throw new BadRequestException(`Invalid ID format: ${id}`);
     }
 
-    const appointment = await this.appointmentModel
-      .findById(id)
-      .populate('barberId')
-      .populate('clientId', '_id name email role provider emailVerified createdAt updatedAt')
-      .exec();
+    const appointment = await this.appointmentModel.findById(id).populate('barberId').populate('clientId', '_id name email role provider emailVerified createdAt updatedAt').exec();
 
     if (!appointment) {
       this.logger.warn(`Appointment with ID ${id} not found.`);
@@ -342,11 +352,7 @@ export class AppointmentsService {
     return appointment;
   }
 
-  async update(
-    id: string,
-    updateAppointmentDto: UpdateAppointmentDto,
-    cancellationActor?: 'user' | 'admin',
-  ): Promise<AppointmentDocument> {
+  async update(id: string, updateAppointmentDto: UpdateAppointmentDto, cancellationActor?: 'user' | 'admin'): Promise<AppointmentDocument> {
     this.logger.log(`Attempting to update appointment ${id} with data: ${JSON.stringify(updateAppointmentDto)}`);
     if (!Types.ObjectId.isValid(id)) {
       this.logger.warn(`Invalid ID format: ${id} for update appointment.`);
@@ -363,6 +369,13 @@ export class AppointmentsService {
     if (currentAppointment.status === 'cancelled') {
       this.logger.warn(`Appointment ${id} is cancelled and cannot be modified.`);
       throw new ConflictException('Una reserva cancelada es definitiva y no puede modificarse.');
+    }
+
+    if (updateAppointmentDto.status === 'cancelled' && cancellationActor === 'user') {
+      const startsAt = getSantiagoAppointmentTimestamp(currentAppointment.date, currentAppointment.timeSlot);
+      if (startsAt - Date.now() < 12 * 60 * 60 * 1000) {
+        throw new ConflictException('Solo puedes cancelar con al menos 12 horas de anticipación.');
+      }
     }
 
     const barberId = updateAppointmentDto.barberId || (currentAppointment.barberId as Types.ObjectId).toString();
@@ -395,7 +408,7 @@ export class AppointmentsService {
 
     const persistenceUpdate: {
       $set: Record<string, unknown>;
-      $unset?: { slotKey: 1 };
+      $unset?: Record<string, 1>;
     } = {
       $set: { ...updateAppointmentDto },
     };
@@ -410,14 +423,36 @@ export class AppointmentsService {
       persistenceUpdate.$set.slotKey = this.buildSlotKey(barberId, date, timeSlot);
     }
 
+    if (this.occupiesClientKey(date, timeSlot, status)) {
+      const clientId = (currentAppointment.clientId as Types.ObjectId).toString();
+      const client = await this.userModel.findById(clientId).exec();
+      if (!client) throw new NotFoundException(`Client with ID ${clientId} not found`);
+      if (client.role !== UserRole.ADMIN) {
+        await this.releaseExpiredClientKeys(clientId);
+        const active = await this.appointmentModel
+          .findOne({
+            ...this.getNonExpiredActiveAppointmentFilter(clientId),
+            _id: { $ne: id },
+          })
+          .exec();
+        if (active) throw this.activeClientConflict();
+        persistenceUpdate.$set.activeClientKey = clientId;
+      } else {
+        persistenceUpdate.$unset = { ...persistenceUpdate.$unset, activeClientKey: 1 };
+      }
+    } else {
+      persistenceUpdate.$unset = { ...persistenceUpdate.$unset, activeClientKey: 1 };
+    }
+
     let updatedAppointment: AppointmentDocument | null;
     try {
-      updatedAppointment = await this.appointmentModel
-        .findByIdAndUpdate(id, persistenceUpdate, { returnDocument: 'after', runValidators: true })
-        .populate('barberId')
-        .populate('clientId', '_id name email role provider emailVerified createdAt updatedAt')
-        .exec();
+      const confirmationTransition = currentAppointment.status === 'pending' && status === 'confirmed';
+      const updateQuery = confirmationTransition
+        ? this.appointmentModel.findOneAndUpdate({ _id: id, status: 'pending' }, persistenceUpdate, { returnDocument: 'after', runValidators: true })
+        : this.appointmentModel.findByIdAndUpdate(id, persistenceUpdate, { returnDocument: 'after', runValidators: true });
+      updatedAppointment = await updateQuery.populate('barberId').populate('clientId', '_id name email role provider emailVerified createdAt updatedAt').exec();
     } catch (error) {
+      if (this.isActiveClientDuplicate(error)) throw this.activeClientConflict();
       if (this.isMongoDuplicateKeyError(error)) {
         this.logger.warn(`Duplicate appointment detected at update persistence layer for appointment ${id}.`);
         throw new ConflictException('El nuevo horario o barbero seleccionado ya tiene una reserva activa.');
@@ -426,10 +461,16 @@ export class AppointmentsService {
     }
 
     if (!updatedAppointment) {
+      if (currentAppointment.status === 'pending' && status === 'confirmed') {
+        throw new ConflictException('La reserva cambió de estado. Actualiza la lista antes de confirmar.');
+      }
       this.logger.error(`Failed to update appointment ${id} despite finding it.`);
       throw new NotFoundException(`Appointment with ID ${id} not found`); // Should theoretically not happen if currentAppointment was found
     }
     this.logger.log(`Appointment ${id} updated successfully.`);
+    if (currentAppointment.status === 'pending' && updatedAppointment.status === 'confirmed') {
+      await this.notifyAppointmentConfirmed(updatedAppointment);
+    }
     if (currentAppointment.status !== 'cancelled' && updatedAppointment.status === 'cancelled') {
       if (this.isAppointmentSlotExpired(updatedAppointment.date, updatedAppointment.timeSlot)) {
         this.logger.debug(`Skipping cancellation email for expired appointment ${id}.`);
@@ -438,6 +479,21 @@ export class AppointmentsService {
       }
     }
     return updatedAppointment;
+  }
+
+  private async notifyAppointmentConfirmed(appointment: AppointmentDocument): Promise<void> {
+    if (!this.emailService) return;
+    const client = appointment.clientId as User;
+    const barber = appointment.barberId as Barber;
+    if (!client?.email || !client.name || !barber?.name) {
+      this.logger.warn(`Appointment ${appointment._id.toString()} confirmed with incomplete email data.`);
+      return;
+    }
+    try {
+      await this.emailService.sendAppointmentConfirmedEmail({ to: client.email, clientName: client.name, barberName: barber.name, date: appointment.date, timeSlot: appointment.timeSlot });
+    } catch (error) {
+      this.logger.error(`Appointment confirmed, but notification failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private async notifyAppointmentCancelled(appointment: AppointmentDocument): Promise<void> {
@@ -514,48 +570,13 @@ export class AppointmentsService {
     const cutoff = this.getAppointmentCutoff();
     this.logger.debug(`Availability cutoff in ${BUSINESS_TIME_ZONE}: ${cutoff.today} ${cutoff.currentTime}.`);
 
-    const slotDurationMinutes = 60;
-    const allPossibleSlots: string[] = [];
-
-    for (const wh of schedule.workingHours) {
-      const workingStart = timeToMinutes(wh.start);
-      const workingEnd = timeToMinutes(wh.end);
-
-      for (
-        let currentSlot = workingStart;
-        currentSlot + slotDurationMinutes <= workingEnd;
-        currentSlot += slotDurationMinutes
-      ) {
-        const slotEnd = currentSlot + slotDurationMinutes;
-        const formattedSlot = minutesToTime(currentSlot);
-
-        let isDuringBreak = false;
-        for (const bt of schedule.breakTimes) {
-          const breakStart = timeToMinutes(bt.start);
-          const breakEnd = timeToMinutes(bt.end);
-
-          if (currentSlot < breakEnd && slotEnd > breakStart) {
-            isDuringBreak = true;
-            break;
-          }
-        }
-
-        if (!isDuringBreak) {
-          allPossibleSlots.push(formattedSlot);
-        }
-      }
-    }
+    const allPossibleSlots = this.getScheduleSlots(schedule);
     this.logger.debug(`Generated ${allPossibleSlots.length} possible slots before checking bookings.`);
 
     // 3. Buscar en MongoDB las horas que ya están reservadas para ese barbero ese día específico
     const bookedFilter = this.getNonExpiredBarberAppointmentFilter(barberId, date);
     this.logger.debug(`Booking lookup filter for barber ${barberId} on ${date}: ${JSON.stringify(bookedFilter)}.`);
-    const bookedAppointments = bookedFilter
-      ? await this.appointmentModel
-        .find(bookedFilter)
-        .select('_id timeSlot status barberId clientId')
-        .exec()
-      : [];
+    const bookedAppointments = bookedFilter ? await this.appointmentModel.find(bookedFilter).select('_id timeSlot status barberId clientId').exec() : [];
 
     const bookedSlots = bookedAppointments.map((app) => app.timeSlot);
     this.logger.debug(`Found ${bookedSlots.length} booked slots: ${bookedSlots.join(', ')}. Appointments: ${JSON.stringify(bookedAppointments.map((app) => this.formatAppointmentForLog(app)))}.`);

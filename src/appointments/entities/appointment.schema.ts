@@ -22,6 +22,10 @@ export class Appointment {
   @Prop({ type: String })
   slotKey?: string;
 
+  // Present only while a non-admin client has a future active reservation.
+  @Prop({ type: String, select: false })
+  activeClientKey?: string;
+
   // Relación con el Barbero seleccionado
   @Prop({ type: Types.ObjectId, ref: 'Barber', required: true })
   barberId: Types.ObjectId | Barber;
@@ -59,3 +63,5 @@ AppointmentSchema.index(
     sparse: true,
   },
 );
+
+AppointmentSchema.index({ activeClientKey: 1 }, { name: 'unique_active_client_key', unique: true, sparse: true });

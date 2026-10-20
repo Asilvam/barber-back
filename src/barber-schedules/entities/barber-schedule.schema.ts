@@ -18,8 +18,8 @@ export class BarberSchedule {
   @Prop({
     type: [
       {
-        start: { type: String, match: /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, required: true }, // HH:MM
-        end: { type: String, match: /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, required: true }, // HH:MM
+        start: { type: String, match: /^([01][0-9]|2[0-3]):[0-5][0-9]$/, required: true }, // HH:MM
+        end: { type: String, match: /^([01][0-9]|2[0-3]):[0-5][0-9]$/, required: true }, // HH:MM
         _id: false,
       },
     ],
@@ -30,8 +30,8 @@ export class BarberSchedule {
   @Prop({
     type: [
       {
-        start: { type: String, match: /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, required: true }, // HH:MM
-        end: { type: String, match: /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, required: true }, // HH:MM
+        start: { type: String, match: /^([01][0-9]|2[0-3]):[0-5][0-9]$/, required: true }, // HH:MM
+        end: { type: String, match: /^([01][0-9]|2[0-3]):[0-5][0-9]$/, required: true }, // HH:MM
         _id: false,
       },
     ],

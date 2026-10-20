@@ -1,5 +1,8 @@
 import { ForbiddenException } from '@nestjs/common';
 import { UsersController } from './users.controller';
+import type { UsersService } from './users.service';
+
+type AuthenticatedRequest = Parameters<UsersController['findOne']>[1];
 import { UserRole } from './schemas/user.schema';
 
 describe('UsersController security', () => {
@@ -10,7 +13,7 @@ describe('UsersController security', () => {
     remove: jest.fn(),
   };
 
-  const controller = new UsersController(usersService as any);
+  const controller = new UsersController(usersService as unknown as UsersService);
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -20,20 +23,16 @@ describe('UsersController security', () => {
     expect(() =>
       controller.findOne('target-user-id', {
         user: { userId: 'other-user-id', role: UserRole.USER },
-      } as any),
+      } as AuthenticatedRequest),
     ).toThrow(ForbiddenException);
   });
 
   it('allows self profile update for non-admin user without role change', () => {
     usersService.update.mockReturnValue({ id: 'self-id' });
 
-    const result = controller.update(
-      'self-id',
-      { name: 'Updated' },
-      {
-        user: { userId: 'self-id', role: UserRole.USER },
-      } as any,
-    );
+    const result = controller.update('self-id', { name: 'Updated' }, {
+      user: { userId: 'self-id', role: UserRole.USER },
+    } as AuthenticatedRequest);
 
     expect(usersService.update).toHaveBeenCalledWith('self-id', { name: 'Updated' });
     expect(result).toEqual({ id: 'self-id' });
@@ -41,25 +40,18 @@ describe('UsersController security', () => {
 
   it('denies self role escalation for non-admin user', () => {
     expect(() =>
-      controller.update(
-        'self-id',
-        { role: UserRole.ADMIN },
-        {
-          user: { userId: 'self-id', role: UserRole.USER },
-        } as any,
-      ),
+      controller.update('self-id', { role: UserRole.ADMIN }, {
+        user: { userId: 'self-id', role: UserRole.USER },
+      } as AuthenticatedRequest),
     ).toThrow(ForbiddenException);
   });
 
   it('allows admin to remove any user', () => {
     usersService.remove.mockReturnValue({ id: 'target-user-id' });
 
-    const result = controller.remove(
-      'target-user-id',
-      {
-        user: { userId: 'admin-id', role: UserRole.ADMIN },
-      } as any,
-    );
+    const result = controller.remove('target-user-id', {
+      user: { userId: 'admin-id', role: UserRole.ADMIN },
+    } as AuthenticatedRequest);
 
     expect(usersService.remove).toHaveBeenCalledWith('target-user-id');
     expect(result).toEqual({ id: 'target-user-id' });

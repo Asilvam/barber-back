@@ -6,8 +6,8 @@
   "private": true,
   "license": "UNLICENSED",
   "engines": {
-    "node": "22.x",
-    "npm": "10.x"
+    "node": "24.x",
+    "npm": "11.x"
   },
   "scripts": {
     "build": "nest build",
@@ -91,5 +91,20 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "overrides": {
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "^4.3.2"
+    },
+    "@nestjs/swagger": {
+      "js-yaml": "^5.5.0"
+    }
+  },
+  "allowScripts": {
+    "@nestjs/core": false,
+    "@scarf/scarf": false,
+    "bcrypt@6.0.0": true,
+    "fsevents@2.3.3": true,
+    "unrs-resolver@1.11.1": true
   }
 }

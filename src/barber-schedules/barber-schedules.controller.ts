@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
 import { BarberSchedulesService } from './barber-schedules.service';
 import { CreateBarberScheduleDto } from './dto/create-barber-schedule.dto';
+import { AvailabilityRangeQueryDto } from './dto/availability-range-query.dto';
 import { UpdateBarberScheduleDto } from './dto/update-barber-schedule.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -29,16 +30,16 @@ export class BarberSchedulesController {
     return this.barberSchedulesService.findAll();
   }
 
+  @Get('availability')
+  @ApiOperation({ summary: 'Obtener disponibilidad de todos los barberos para un rango de fechas' })
+  async getAvailability(@Query() query: AvailabilityRangeQueryDto) {
+    return this.barberSchedulesService.getAvailability(query.start, query.end);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obtener detalle de un horario de barbero por ID' })
   findOne(@Param('id') id: string) {
     return this.barberSchedulesService.findOne(id);
-  }
-
-  @Get('availability')
-  @ApiOperation({ summary: 'Obtener disponibilidad de todos los barberos para un rango de fechas' })
-  async getAvailability(@Query('start') start: string, @Query('end') end: string) {
-    return this.barberSchedulesService.getAvailability(start, end);
   }
 
   @Patch(':id')

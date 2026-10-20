@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsMongoId, Matches } from 'class-validator';
+import { IsNotEmpty, IsString, IsMongoId, Matches, IsDateString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateAppointmentDto {
@@ -8,12 +8,13 @@ export class CreateAppointmentDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
     message: 'La fecha debe tener el formato YYYY-MM-DD',
   })
+  @IsDateString({ strict: true }, { message: 'La fecha debe existir en el calendario' })
   date: string;
 
   @ApiProperty({ example: '15:30', description: 'Hora de la cita en formato HH:MM' })
   @IsString()
   @IsNotEmpty()
-  @Matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, {
+  @Matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/, {
     message: 'La hora debe tener el formato HH:MM',
   })
   timeSlot: string;
