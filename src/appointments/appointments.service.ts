@@ -307,9 +307,14 @@ export class AppointmentsService {
     }
   }
 
-  async findAll() {
+  async findAll(includeArchived = false) {
     this.logger.debug('Finding all appointments.');
-    return await this.appointmentModel.find().populate('barberId').populate('clientId', '_id name email role provider emailVerified createdAt updatedAt').sort({ date: -1, timeSlot: -1 }).exec();
+    return await this.appointmentModel
+      .find(includeArchived ? {} : { archivedAt: { $exists: false } })
+      .populate('barberId')
+      .populate('clientId', '_id name email role provider emailVerified createdAt updatedAt')
+      .sort({ date: -1, timeSlot: -1 })
+      .exec();
   }
 
   async findOne(id: string) {
@@ -482,11 +487,7 @@ export class AppointmentsService {
       await this.notifyAppointmentConfirmed(updatedAppointment);
     }
     if (currentAppointment.status !== 'cancelled' && updatedAppointment.status === 'cancelled') {
-      if (this.isAppointmentSlotExpired(updatedAppointment.date, updatedAppointment.timeSlot)) {
-        this.logger.debug(`Skipping cancellation email for expired appointment ${id}.`);
-      } else {
-        await this.notifyAppointmentCancelled(updatedAppointment);
-      }
+      await this.notifyAppointmentCancelled(updatedAppointment);
     }
     return updatedAppointment;
   }
@@ -525,6 +526,7 @@ export class AppointmentsService {
         barberName: barber.name,
         date: appointment.date,
         timeSlot: appointment.timeSlot,
+        cancelledBy: appointment.cancelledBy ?? 'admin',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -532,21 +534,20 @@ export class AppointmentsService {
     }
   }
 
-  async remove(id: string) {
-    this.logger.log(`Attempting to remove appointment with ID: ${id}.`);
-    if (!Types.ObjectId.isValid(id)) {
-      this.logger.warn(`Invalid ID format: ${id} for remove appointment.`);
-      throw new BadRequestException(`Invalid ID format: ${id}`);
+  async remove(id: string, adminId: string) {
+    if (!Types.ObjectId.isValid(id) || !Types.ObjectId.isValid(adminId)) {
+      throw new BadRequestException('El identificador de la reserva o administrador no es válido.');
     }
-
-    const deletedAppointment = await this.appointmentModel.findByIdAndDelete(id).exec();
-
-    if (!deletedAppointment) {
-      this.logger.warn(`Appointment with ID ${id} not found for removal.`);
-      throw new NotFoundException(`Appointment with ID ${id} not found`);
+    const appointment = await this.appointmentModel.findById(id).exec();
+    if (!appointment) throw new NotFoundException('La reserva no existe.');
+    if (!['cancelled', 'completed'].includes(appointment.status)) {
+      throw new ConflictException('Solo puedes archivar reservas canceladas o completadas.');
     }
-    this.logger.log(`Appointment ${id} removed successfully.`);
-    return deletedAppointment;
+    const archived = await this.appointmentModel
+      .findOneAndUpdate({ _id: id, status: appointment.status, archivedAt: { $exists: false } }, { $set: { archivedAt: new Date(), archivedBy: new Types.ObjectId(adminId) } }, { returnDocument: 'after', runValidators: true })
+      .exec();
+    if (!archived) throw new ConflictException('La reserva ya fue archivada o cambió de estado. Actualiza el listado.');
+    return archived;
   }
 
   async getAvailableSlots(barberId: string, date: string) {

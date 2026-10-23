@@ -109,6 +109,14 @@ describe('EmailService', () => {
     expect(message.html).not.toContain('#245448');
   });
 
+  it('confirms cancellation by the client in the email', async () => {
+    const service = new EmailService(config);
+    const sendEmail = jest.spyOn(service, 'sendEmail').mockResolvedValue();
+    await service.sendAppointmentCancelledEmail({ to: 'client@example.com', clientName: 'Client', barberName: 'Barber', date: '2026-08-10', timeSlot: '10:00', cancelledBy: 'user' });
+    expect(sendEmail.mock.calls[0][0].subject).toBe('Cancelaste tu reserva');
+    expect(sendEmail.mock.calls[0][0].html).toContain('Tu reserva fue cancelada correctamente.');
+  });
+
   it('builds an appointment cancellation email', async () => {
     const service = new EmailService(config);
     const sendEmail = jest.spyOn(service, 'sendEmail').mockResolvedValue();
@@ -123,10 +131,10 @@ describe('EmailService', () => {
 
     expect(sendEmail).toHaveBeenCalledTimes(1);
     const message = sendEmail.mock.calls[0][0];
-    expect(message.subject).toBe('Tu reserva fue cancelada');
+    expect(message.subject).toBe('La barbería canceló tu reserva');
     expect(message.html).toContain('Tu cita fue cancelada');
     expect(message.html).toContain('RESERVA CANCELADA');
-    expect(message.html).toContain('Administración canceló');
+    expect(message.html).toContain('La barbería canceló');
     expect(message.html).toContain('El horario fue liberado');
     expect(message.html).toContain('background-color: #1b191d');
     expect(message.html).toContain('background-color: #c91470');

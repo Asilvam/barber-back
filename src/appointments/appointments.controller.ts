@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Req, Logger, ForbiddenException, ConflictException } from '@nestjs/common'; // Importamos Logger
+import { DefaultValuePipe, ParseBoolPipe, Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Req, Logger, ForbiddenException, ConflictException } from '@nestjs/common'; // Importamos Logger
 import { AppointmentsService } from './appointments.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { AvailabilityQueryDto } from './dto/availability-query.dto';
@@ -40,9 +40,9 @@ export class AppointmentsController {
   @UseGuards(RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Listar todas las citas (Admin: Agenda completa)' })
-  findAll() {
+  findAll(@Query('includeArchived', new DefaultValuePipe(false), ParseBoolPipe) includeArchived = false) {
     this.logger.log('Received request to list all appointments (Admin).');
-    return this.appointmentsService.findAll();
+    return this.appointmentsService.findAll(includeArchived);
   }
 
   @Get('availability')
@@ -111,10 +111,10 @@ export class AppointmentsController {
   @Delete(':id')
   @UseGuards(RolesGuard)
   @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Eliminar una cita (Admin)' })
-  remove(@Param('id') id: string) {
+  @ApiOperation({ summary: 'Archivar una cita cancelada o completada (Admin)' })
+  remove(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     this.logger.log(`Received request to remove appointment with ID: ${id}.`);
-    return this.appointmentsService.remove(id);
+    return this.appointmentsService.remove(id, req.user.userId);
   }
 
   private extractClientId(clientValue: unknown): string {

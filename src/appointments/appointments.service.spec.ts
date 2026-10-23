@@ -4,7 +4,7 @@ import { AppointmentsService } from './appointments.service';
 import { UserRole } from '../users/schemas/user.schema';
 
 type ServiceDependencies = ConstructorParameters<typeof AppointmentsService>;
-type ModelMock = Partial<Record<'findOneAndUpdate' | 'findOne' | 'findById' | 'updateMany', jest.Mock>>;
+type ModelMock = Partial<Record<'find' | 'findOneAndUpdate' | 'findOne' | 'findById' | 'updateMany', jest.Mock>>;
 
 // These tests provide only the Mongoose methods exercised by each scenario.
 function createService(appointments: ModelMock = {}, barbers: ModelMock = {}, users: ModelMock = {}, schedules: ModelMock = {}, email?: Partial<NonNullable<ServiceDependencies[4]>>) {
@@ -34,6 +34,42 @@ function queryResolved<T>(value: T) {
 }
 
 describe('AppointmentsService security', () => {
+  it.each(['cancelled', 'completed'])('archives %s without deleting the record or emailing', async (status) => {
+    const id = '507f1f77bcf86cd799439013';
+    const admin = '507f1f77bcf86cd799439014';
+    const current = { _id: id, status };
+    const archived = { ...current, archivedAt: new Date(), archivedBy: new Types.ObjectId(admin) };
+    const model = { findById: jest.fn().mockReturnValue(queryResolved(current)), findOneAndUpdate: jest.fn().mockReturnValue(queryResolved(archived)) };
+    const mail = { sendAppointmentCancelledEmail: jest.fn() };
+    await expect(createService(model, {}, {}, {}, mail).remove(id, admin)).resolves.toBe(archived);
+    expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: id, status, archivedAt: { $exists: false } },
+      { $set: { archivedAt: expect.any(Date) as unknown, archivedBy: new Types.ObjectId(admin) } },
+      { returnDocument: 'after', runValidators: true },
+    );
+    expect(mail.sendAppointmentCancelledEmail).not.toHaveBeenCalled();
+  });
+
+  it.each(['pending', 'confirmed'])('rejects archiving an active %s reservation', async (status) => {
+    const model = { findById: jest.fn().mockReturnValue(queryResolved({ status })), findOneAndUpdate: jest.fn() };
+    await expect(createService(model).remove('507f1f77bcf86cd799439013', '507f1f77bcf86cd799439014')).rejects.toThrow(ConflictException);
+    expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a repeated or concurrent archive', async () => {
+    const model = { findById: jest.fn().mockReturnValue(queryResolved({ status: 'cancelled' })), findOneAndUpdate: jest.fn().mockReturnValue(queryResolved(null)) };
+    await expect(createService(model).remove('507f1f77bcf86cd799439013', '507f1f77bcf86cd799439014')).rejects.toThrow(ConflictException);
+  });
+
+  it('excludes archived records by default and includes them for history', async () => {
+    const model = { find: jest.fn().mockReturnValue(queryResolved([])) };
+    const service = createService(model);
+    await service.findAll();
+    expect(model.find).toHaveBeenLastCalledWith({ archivedAt: { $exists: false } });
+    await service.findAll(true);
+    expect(model.find).toHaveBeenLastCalledWith({});
+  });
+
   it('rejects new reservations for a blocked client even with an existing session', async () => {
     const model = { findOne: jest.fn() };
     const service = createService(model, {}, { findById: jest.fn().mockReturnValue(queryResolved({ role: UserRole.USER, isBookingBlocked: true })) });
@@ -346,10 +382,11 @@ describe('AppointmentsService security', () => {
       barberName: 'Barber Test',
       date: '2026-08-10',
       timeSlot: '10:00',
+      cancelledBy: 'user',
     });
   });
 
-  it('allows an admin to cancel an expired appointment without sending a cancellation email', async () => {
+  it('allows an admin to cancel an expired appointment and sends a cancellation email', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-07-19T16:00:00Z'));
     const appointmentId = '507f1f77bcf86cd799439013';
     const currentAppointment = {
@@ -388,7 +425,7 @@ describe('AppointmentsService security', () => {
 
     await expect(service.update(appointmentId, { status: 'cancelled' }, 'admin')).resolves.toBe(updatedAppointment);
     expect(appointmentModel.findOneAndUpdate).toHaveBeenCalled();
-    expect(emailService.sendAppointmentCancelledEmail).not.toHaveBeenCalled();
+    expect(emailService.sendAppointmentCancelledEmail).toHaveBeenCalledWith(expect.objectContaining({ cancelledBy: 'admin' }));
   });
 
   it('rejects every update after an appointment is cancelled', async () => {

@@ -75,6 +75,25 @@ describe('Appointment concurrency against MongoDB', () => {
     return service.create(clientId, { barberId: barber, date, timeSlot }) as Promise<AppointmentDocument>;
   }
 
+  it.each(['cancelled', 'completed'] as const)('archives a %s record while retaining client history in MongoDB', async (status) => {
+    const first = await book(client, '09:00');
+    if (status === 'completed') {
+      await service.update(first._id.toString(), { status: 'confirmed' }, 'admin');
+      jest.spyOn(Date, 'now').mockReturnValue(getSantiagoAppointmentTimestamp(date, '09:00'));
+    }
+    await service.update(first._id.toString(), { status }, 'admin');
+    const archived = await service.remove(first._id.toString(), admin);
+    expect(archived.archivedBy?.toString()).toBe(admin);
+    expect(archived.archivedAt).toBeInstanceOf(Date);
+    expect(archived.status).toBe(status);
+    expect(await appointments.countDocuments()).toBe(1);
+    expect(await service.findAll()).toHaveLength(0);
+    const history = await service.findAll(true);
+    expect(history).toHaveLength(1);
+    expect(history[0]._id.toString()).toBe(first._id.toString());
+    await expect(service.remove(first._id.toString(), admin)).rejects.toThrow(ConflictException);
+  });
+
   // Force both requests past the preflight read before either can insert.
   function synchronizeValidation() {
     const original = service['validateBarberAvailabilityForSlot'];

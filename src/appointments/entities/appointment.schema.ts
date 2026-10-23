@@ -45,6 +45,12 @@ export class Appointment {
   @Prop({ type: Date })
   cancelledAt?: Date;
 
+  @Prop({ type: Date })
+  archivedAt?: Date;
+
+  @Prop({ type: Types.ObjectId, ref: 'User' })
+  archivedBy?: Types.ObjectId;
+
   // Comentarios o peticiones especiales del cliente
   // @Prop({ trim: true })
   // notes?: string; // Eliminado

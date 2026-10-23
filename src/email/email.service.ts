@@ -9,6 +9,7 @@ interface AppointmentEmail {
   barberName: string;
   date: string;
   timeSlot: string;
+  cancelledBy?: 'user' | 'admin';
 }
 
 interface AppointmentEmailCopy {
@@ -96,13 +97,16 @@ export class EmailService {
 
     await this.sendEmail({
       to: appointment.to,
-      subject: 'Tu reserva fue cancelada',
+      subject: appointment.cancelledBy === 'user' ? 'Cancelaste tu reserva' : 'La barbería canceló tu reserva',
       fromName,
       html: this.buildAppointmentEmail(appointment, {
-        preheader: 'Administración canceló tu reserva.',
+        preheader: appointment.cancelledBy === 'user' ? 'Tu reserva fue cancelada correctamente.' : 'La barbería canceló tu reserva.',
         eyebrow: 'ACTUALIZACIÓN DE RESERVA',
         title: 'Tu cita fue cancelada',
-        introduction: 'Administración canceló la siguiente reserva asociada a tu cuenta.',
+        introduction:
+          appointment.cancelledBy === 'user'
+            ? 'Confirmamos que cancelaste la siguiente reserva. El horario quedó disponible para otra persona.'
+            : 'La barbería canceló la siguiente reserva asociada a tu cuenta. El horario quedó disponible.',
         statusLabel: 'RESERVA CANCELADA',
         statusBackground: '#f9deeb',
         statusColor: '#941251',

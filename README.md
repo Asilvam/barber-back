@@ -77,10 +77,10 @@ Notes:
 
 - Creating an appointment assigns an internal `slotKey` and sends a pending-approval email.
 - Changing an active appointment to `cancelled` removes its `slotKey`, releases the block, and emails the client.
-- Cancelling an expired appointment does not send email.
+- Cancellation by administration also emails the client for past appointments; client cancellation still requires at least 12 hours of notice. The message identifies who cancelled.
 - `completed` appointments retain their `slotKey`; expired blocks cannot be booked again.
 - Email delivery failures are logged and never roll back appointment creation, confirmation, or cancellation.
-- `DELETE /appointments/:id` permanently deletes the record and does not send a cancellation email.
+- `DELETE /appointments/:id` archives only cancelled or completed records, retaining status, history, archive date and administrator. It sends no email. The default list excludes archived records; administrators can use `GET /appointments?includeArchived=true` for client history.
 - Appointment expiration is evaluated in the `America/Santiago` timezone.
 
 ## Active reservation concurrency
@@ -343,4 +343,4 @@ Response: `Appointment`
 - Confirmed reservations can be cancelled, or completed by administration from their start time onward (America/Santiago). Past confirmed reservations can therefore be closed manually.
 - Cancelled and completed reservations are final and cannot be edited or reactivated. There is no automatic completion.
 - Updates check the previously read state atomically. If another request changed it, the API returns 409 instead of overwriting the new state.
-- Completion keeps the occupied slot and removes the active-client key; existing cancellation and deletion policies are unchanged.
+- Completion keeps the occupied slot and removes the active-client key; cancellation releases the slot. Final records can be archived without physical deletion.
