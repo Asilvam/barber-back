@@ -344,3 +344,7 @@ Response: `Appointment`
 - Cancelled and completed reservations are final and cannot be edited or reactivated. There is no automatic completion.
 - Updates check the previously read state atomically. If another request changed it, the API returns 409 instead of overwriting the new state.
 - Completion keeps the occupied slot and removes the active-client key; cancellation releases the slot. Final records can be archived without physical deletion.
+
+### Remove one schedule block
+
+`PATCH /barber-schedules/:id/remove-block` is admin-only and accepts `{ "start": "10:00", "end": "11:00" }`. It removes that exact future work interval while retaining the day, breaks, other intervals and reservation history. Existing pending, confirmed or completed reservations overlapping the interval prevent removal; cancelled reservations do not. Invalid or stale blocks return 400/409.

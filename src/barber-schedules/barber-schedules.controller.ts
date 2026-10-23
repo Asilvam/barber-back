@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } f
 import { BarberSchedulesService } from './barber-schedules.service';
 import { CreateBarberScheduleDto } from './dto/create-barber-schedule.dto';
 import { AvailabilityRangeQueryDto } from './dto/availability-range-query.dto';
+import { RemoveScheduleBlockDto } from './dto/remove-schedule-block.dto';
 import { UpdateBarberScheduleDto } from './dto/update-barber-schedule.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -40,6 +41,14 @@ export class BarberSchedulesController {
   @ApiOperation({ summary: 'Obtener detalle de un horario de barbero por ID' })
   findOne(@Param('id') id: string) {
     return this.barberSchedulesService.findOne(id);
+  }
+
+  @Patch(':id/remove-block')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Quitar un bloque futuro y libre del día (Admin)' })
+  removeBlock(@Param('id') id: string, @Body() block: RemoveScheduleBlockDto) {
+    return this.barberSchedulesService.removeBlock(id, block);
   }
 
   @Patch(':id')

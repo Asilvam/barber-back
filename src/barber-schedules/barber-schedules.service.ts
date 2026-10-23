@@ -1,3 +1,5 @@
+import { getSantiagoAppointmentTimestamp, timeToMinutes } from '../common/time/santiago-time';
+import { RemoveScheduleBlockDto } from './dto/remove-schedule-block.dto';
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -76,6 +78,34 @@ export class BarberSchedulesService {
       throw new NotFoundException(`Barber schedule with ID "${id}" not found.`);
     }
     return updatedSchedule;
+  }
+
+  async removeBlock(id: string, block: RemoveScheduleBlockDto): Promise<BarberSchedule> {
+    if (!Types.ObjectId.isValid(id) || block.start >= block.end) {
+      throw new BadRequestException('El bloque de horario no es válido.');
+    }
+    const schedule = await this.barberScheduleModel.findById(id).exec();
+    if (!schedule) throw new NotFoundException('La agenda del día no existe.');
+    if (schedule.isDayOff || !schedule.workingHours.some((item) => item.start === block.start && item.end === block.end)) {
+      throw new ConflictException('El bloque ya no existe. Actualiza la agenda.');
+    }
+    if (getSantiagoAppointmentTimestamp(schedule.date, block.start) <= Date.now()) {
+      throw new ConflictException('Solo puedes quitar bloques futuros.');
+    }
+    const reservations = await this.appointmentModel
+      .find({ barberId: schedule.barberId, date: schedule.date, status: { $in: ['pending', 'confirmed', 'completed'] } })
+      .select('timeSlot')
+      .exec();
+    const overlaps = reservations.some((appointment) => {
+      const start = timeToMinutes(appointment.timeSlot);
+      return start < timeToMinutes(block.end) && start + 60 > timeToMinutes(block.start);
+    });
+    if (overlaps) throw new ConflictException('El bloque tiene una reserva. Debes cancelarla antes de quitarlo.');
+    const updated = await this.barberScheduleModel
+      .findOneAndUpdate({ _id: id, date: schedule.date, isDayOff: false, workingHours: schedule.workingHours }, { $pull: { workingHours: { start: block.start, end: block.end } } }, { returnDocument: 'after', runValidators: true })
+      .exec();
+    if (!updated) throw new ConflictException('La agenda cambió. Actualízala e inténtalo nuevamente.');
+    return updated;
   }
 
   async remove(id: string): Promise<BarberSchedule> {

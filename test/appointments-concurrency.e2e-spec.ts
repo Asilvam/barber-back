@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import { ConflictException, Logger } from '@nestjs/common';
 import { Connection, ConnectionStates, createConnection, Model, Types } from 'mongoose';
+import { BarberSchedulesService } from '../src/barber-schedules/barber-schedules.service';
 import { AppointmentsService } from '../src/appointments/appointments.service';
 import { Appointment, AppointmentDocument, AppointmentSchema } from '../src/appointments/entities/appointment.schema';
 import { Barber, BarberSchema } from '../src/barbers/entities/barber.schema';
@@ -92,6 +93,51 @@ describe('Appointment concurrency against MongoDB', () => {
     expect(history).toHaveLength(1);
     expect(history[0]._id.toString()).toBe(first._id.toString());
     await expect(service.remove(first._id.toString(), admin)).rejects.toThrow(ConflictException);
+  });
+
+  it('removes just one free block and prevents new reservations in it', async () => {
+    const configured = await schedules
+      .findOneAndUpdate(
+        { barberId: barber, date },
+        {
+          $set: {
+            workingHours: [
+              { start: '09:00', end: '10:00' },
+              { start: '10:00', end: '11:00' },
+            ],
+          },
+        },
+        { returnDocument: 'after' },
+      )
+      .exec();
+    const scheduleService = new BarberSchedulesService(schedules, barbers, appointments);
+    const updated = await scheduleService.removeBlock(configured!._id.toString(), { start: '09:00', end: '10:00' });
+    expect(updated.workingHours.map(({ start, end }) => ({ start, end }))).toEqual([{ start: '10:00', end: '11:00' }]);
+    expect(await schedules.countDocuments()).toBe(1);
+    await expect(book(client, '09:00')).rejects.toThrow('not an available');
+    await expect(book(client, '10:00')).resolves.toBeDefined();
+  });
+
+  it('requires cancellation before removing an occupied block and preserves its history', async () => {
+    await schedules.updateOne(
+      { barberId: barber, date },
+      {
+        $set: {
+          workingHours: [
+            { start: '09:00', end: '10:00' },
+            { start: '10:00', end: '11:00' },
+          ],
+        },
+      },
+    );
+    const configured = await schedules.findOne({ barberId: barber, date }).exec();
+    const first = await book(client, '09:00');
+    const scheduleService = new BarberSchedulesService(schedules, barbers, appointments);
+    await expect(scheduleService.removeBlock(configured!._id.toString(), { start: '09:00', end: '10:00' })).rejects.toThrow('cancelarla');
+    await service.update(first._id.toString(), { status: 'cancelled' }, 'admin');
+    await scheduleService.removeBlock(configured!._id.toString(), { start: '09:00', end: '10:00' });
+    expect((await appointments.findById(first._id).exec())?.status).toBe('cancelled');
+    expect(await appointments.countDocuments()).toBe(1);
   });
 
   // Force both requests past the preflight read before either can insert.
