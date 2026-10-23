@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
+import { DefaultValuePipe, ParseBoolPipe, Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
 import { BarberSchedulesService } from './barber-schedules.service';
 import { CreateBarberScheduleDto } from './dto/create-barber-schedule.dto';
 import { AvailabilityRangeQueryDto } from './dto/availability-range-query.dto';
@@ -63,7 +63,7 @@ export class BarberSchedulesController {
   @UseGuards(RolesGuard) // Aplica RolesGuard
   @Roles(UserRole.ADMIN) // Solo ADMIN puede eliminar horarios
   @ApiOperation({ summary: 'Eliminar un horario de barbero (Admin)' })
-  remove(@Param('id') id: string) {
-    return this.barberSchedulesService.remove(id);
+  remove(@Param('id') id: string, @Query('cancelReservations', new DefaultValuePipe(false), ParseBoolPipe) cancelReservations = false) {
+    return this.barberSchedulesService.remove(id, cancelReservations);
   }
 }

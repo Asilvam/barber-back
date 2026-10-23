@@ -140,6 +140,39 @@ describe('Appointment concurrency against MongoDB', () => {
     expect(await appointments.countDocuments()).toBe(1);
   });
 
+  it.each(['block', 'day'])('cancels and emails before removing an occupied future %s', async (mode) => {
+    await schedules.updateOne(
+      { barberId: barber, date },
+      {
+        $set: {
+          workingHours: [
+            { start: '09:00', end: '10:00' },
+            { start: '10:00', end: '11:00' },
+          ],
+        },
+      },
+    );
+    const configured = await schedules.findOne({ barberId: barber, date }).exec();
+    const first = await book(client, '09:00');
+    await service.update(first._id.toString(), { status: 'confirmed' }, 'admin');
+    const email = { sendAppointmentCancelledEmail: jest.fn().mockResolvedValue(undefined) };
+    const cancellationService = new AppointmentsService(appointments, barbers, users, schedules, email as unknown as ConstructorParameters<typeof AppointmentsService>[4]);
+    const scheduleService = new BarberSchedulesService(schedules, barbers, appointments, cancellationService);
+    if (mode === 'block') {
+      await scheduleService.removeBlock(configured!._id.toString(), { start: '09:00', end: '10:00', cancelReservations: true });
+      expect((await schedules.findById(configured!._id).exec())?.workingHours).toHaveLength(1);
+    } else {
+      await scheduleService.remove(configured!._id.toString(), true);
+      expect(await schedules.countDocuments()).toBe(0);
+    }
+    const retained = await appointments.findById(first._id).select('+slotKey').exec();
+    expect(retained?.status).toBe('cancelled');
+    expect(retained?.cancelledBy).toBe('admin');
+    expect(retained?.slotKey).toBeUndefined();
+    expect(email.sendAppointmentCancelledEmail).toHaveBeenCalledTimes(1);
+    expect(email.sendAppointmentCancelledEmail).toHaveBeenCalledWith(expect.objectContaining({ to: 'client@example.test', cancelledBy: 'admin' }));
+  });
+
   // Force both requests past the preflight read before either can insert.
   function synchronizeValidation() {
     const original = service['validateBarberAvailabilityForSlot'];

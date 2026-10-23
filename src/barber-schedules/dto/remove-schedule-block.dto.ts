@@ -1,6 +1,10 @@
-import { IsString, Matches } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, Matches } from 'class-validator';
 
 export class RemoveScheduleBlockDto {
+  @IsOptional()
+  @IsBoolean()
+  cancelReservations?: boolean;
+
   @IsString()
   @Matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/)
   start: string;

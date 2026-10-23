@@ -1,6 +1,7 @@
-import { getSantiagoAppointmentTimestamp, timeToMinutes } from '../common/time/santiago-time';
+import { AppointmentsService } from '../appointments/appointments.service';
+import { getSantiagoAppointmentTimestamp, getSantiagoDateTime, timeToMinutes } from '../common/time/santiago-time';
 import { RemoveScheduleBlockDto } from './dto/remove-schedule-block.dto';
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Optional, Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { BarberSchedule, BarberScheduleDocument } from './entities/barber-schedule.schema';
@@ -21,6 +22,7 @@ export class BarberSchedulesService {
     @InjectModel(BarberSchedule.name) private barberScheduleModel: Model<BarberScheduleDocument>,
     @InjectModel(Barber.name) private barberModel: Model<Barber>, // Para validar barberId
     @InjectModel(Appointment.name) private appointmentModel: Model<AppointmentDocument>, // For availability queries
+    @Optional() private readonly appointmentsService?: AppointmentsService,
   ) {}
 
   async create(createBarberScheduleDto: CreateBarberScheduleDto): Promise<BarberSchedule> {
@@ -92,15 +94,7 @@ export class BarberSchedulesService {
     if (getSantiagoAppointmentTimestamp(schedule.date, block.start) <= Date.now()) {
       throw new ConflictException('Solo puedes quitar bloques futuros.');
     }
-    const reservations = await this.appointmentModel
-      .find({ barberId: schedule.barberId, date: schedule.date, status: { $in: ['pending', 'confirmed', 'completed'] } })
-      .select('timeSlot')
-      .exec();
-    const overlaps = reservations.some((appointment) => {
-      const start = timeToMinutes(appointment.timeSlot);
-      return start < timeToMinutes(block.end) && start + 60 > timeToMinutes(block.start);
-    });
-    if (overlaps) throw new ConflictException('El bloque tiene una reserva. Debes cancelarla antes de quitarlo.');
+    await this.cancelReservationsForRemoval(schedule, block.cancelReservations ?? false, block);
     const updated = await this.barberScheduleModel
       .findOneAndUpdate({ _id: id, date: schedule.date, isDayOff: false, workingHours: schedule.workingHours }, { $pull: { workingHours: { start: block.start, end: block.end } } }, { returnDocument: 'after', runValidators: true })
       .exec();
@@ -108,15 +102,48 @@ export class BarberSchedulesService {
     return updated;
   }
 
-  async remove(id: string): Promise<BarberSchedule> {
+  async remove(id: string, cancelReservations = false): Promise<BarberSchedule> {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException(`Invalid ID format: ${id}`);
     }
+    const schedule = await this.barberScheduleModel.findById(id).exec();
+    if (!schedule) throw new NotFoundException('La agenda del día no existe.');
+    if (schedule.date < getSantiagoDateTime().today || schedule.workingHours.some((block) => getSantiagoAppointmentTimestamp(schedule.date, block.start) <= Date.now())) {
+      throw new ConflictException('No puedes eliminar una agenda con horarios vencidos.');
+    }
+    await this.cancelReservationsForRemoval(schedule, cancelReservations);
     const deletedSchedule = await this.barberScheduleModel.findByIdAndDelete(id).exec();
     if (!deletedSchedule) {
       throw new NotFoundException(`Barber schedule with ID "${id}" not found.`);
     }
     return deletedSchedule;
+  }
+
+  private async cancelReservationsForRemoval(schedule: BarberSchedule, allowCancellation: boolean, block?: { start: string; end: string }) {
+    const reservations = await this.appointmentModel
+      .find({ barberId: schedule.barberId, date: schedule.date, status: { $in: ['pending', 'confirmed', 'completed'] } })
+      .select('timeSlot status')
+      .exec();
+    const affected = reservations.filter((appointment) => {
+      if (!block) return true;
+      const start = timeToMinutes(appointment.timeSlot);
+      return start < timeToMinutes(block.end) && start + 60 > timeToMinutes(block.start);
+    });
+    if (affected.some((appointment) => appointment.status === 'completed')) {
+      throw new ConflictException('El horario tiene una reserva completada y no se puede quitar.');
+    }
+    if (affected.length && (!allowCancellation || !this.appointmentsService)) {
+      throw new ConflictException('El bloque tiene una reserva. Debes cancelarla antes de quitarlo o confirmar su cancelación.');
+    }
+    // Reuse the normal cancellation flow: atomic state transition, slot release and client email.
+    for (const appointment of affected) {
+      if (getSantiagoAppointmentTimestamp(schedule.date, appointment.timeSlot) <= Date.now()) {
+        throw new ConflictException('No puedes quitar un horario con reservas vencidas.');
+      }
+    }
+    for (const appointment of affected) {
+      await this.appointmentsService!.update(appointment._id.toString(), { status: 'cancelled' }, 'admin');
+    }
   }
 
   // New method: getAvailability for a date range

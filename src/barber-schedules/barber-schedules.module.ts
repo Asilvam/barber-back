@@ -1,3 +1,4 @@
+import { AppointmentsModule } from '../appointments/appointments.module';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { BarberSchedulesService } from './barber-schedules.service';
@@ -8,6 +9,7 @@ import { Appointment, AppointmentSchema } from '../appointments/entities/appoint
 
 @Module({
   imports: [
+    AppointmentsModule,
     MongooseModule.forFeature([
       { name: BarberSchedule.name, schema: BarberScheduleSchema },
       { name: Barber.name, schema: BarberSchema },

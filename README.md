@@ -347,4 +347,6 @@ Response: `Appointment`
 
 ### Remove one schedule block
 
-`PATCH /barber-schedules/:id/remove-block` is admin-only and accepts `{ "start": "10:00", "end": "11:00" }`. It removes that exact future work interval while retaining the day, breaks, other intervals and reservation history. Existing pending, confirmed or completed reservations overlapping the interval prevent removal; cancelled reservations do not. Invalid or stale blocks return 400/409.
+`PATCH /barber-schedules/:id/remove-block` is admin-only and accepts `{ "start": "10:00", "end": "11:00" }`. With explicit cancellation consent it removes that exact future work interval while retaining the day, breaks, other intervals and reservation history. Overlapping pending or confirmed reservations require explicit `cancelReservations: true`; the usual admin cancellation flow sends the client email before removing the interval. Completed reservations prevent removal; cancelled records remain in history. Invalid or stale blocks return 400/409.
+
+Deleting a full future day also requires `?cancelReservations=true` if it contains pending or confirmed reservations. A past day or any work interval that has already started prevents full-day deletion. If cancellation fails, the schedule is not removed. Email transport failures retain the usual policy: logged without reversing the saved cancellation; delivery is not guaranteed.

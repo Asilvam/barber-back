@@ -54,3 +54,61 @@ describe('Removing one schedule block', () => {
     await expect(setup(schedule, [], null).service.removeBlock(id, block)).rejects.toThrow('agenda cambió');
   });
 });
+
+describe('Removing a full day with expired blocks', () => {
+  const id = '507f1f77bcf86cd799439013';
+  afterEach(() => jest.useRealTimers());
+  it.each([
+    { date: '2026-10-21', workingHours: [] },
+    {
+      date: '2026-10-22',
+      workingHours: [
+        { start: '09:00', end: '10:00' },
+        { start: '18:00', end: '19:00' },
+      ],
+    },
+    { date: '2026-10-22', workingHours: [{ start: '10:00', end: '11:00' }] },
+  ])('keeps a past or already started schedule: %j', async (schedule) => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-22T13:00:00Z'));
+    const model = { findById: jest.fn().mockReturnValue(query(schedule)), findByIdAndDelete: jest.fn() };
+    const service = new BarberSchedulesService(model as unknown as Dependencies[0], {} as Dependencies[1], {} as Dependencies[2]);
+    await expect(service.remove(id)).rejects.toThrow('vencidos');
+    expect(model.findByIdAndDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe('Confirmed cancellation before removing a schedule', () => {
+  const id = '507f1f77bcf86cd799439013';
+  const schedule = { _id: id, barberId: '507f1f77bcf86cd799439012', date: '2028-02-29', workingHours: [{ start: '10:00', end: '11:00' }], isDayOff: false };
+  function setup(status = 'confirmed', fails = false) {
+    const model = { findById: jest.fn().mockReturnValue(query(schedule)), findOneAndUpdate: jest.fn().mockReturnValue(query(schedule)), findByIdAndDelete: jest.fn().mockReturnValue(query(schedule)) };
+    const appointments = { find: jest.fn().mockReturnValue(query([{ _id: id, timeSlot: '10:00', status }])) };
+    const cancellation = { update: fails ? jest.fn().mockRejectedValue(new ConflictException('changed')) : jest.fn().mockResolvedValue({ status: 'cancelled' }) };
+    const service = new BarberSchedulesService(model as unknown as Dependencies[0], {} as Dependencies[1], appointments as unknown as Dependencies[2], cancellation as unknown as Dependencies[3]);
+    return { service, model, cancellation };
+  }
+  it.each(['pending', 'confirmed'])('cancels %s through the normal email flow before removal', async (status) => {
+    const { service, model, cancellation } = setup(status);
+    await service.removeBlock(id, { start: '10:00', end: '11:00', cancelReservations: true });
+    expect(cancellation.update).toHaveBeenCalledWith(id, { status: 'cancelled' }, 'admin');
+    expect(cancellation.update.mock.invocationCallOrder[0]).toBeLessThan(model.findOneAndUpdate.mock.invocationCallOrder[0]);
+  });
+  it('keeps the block if cancellation fails or the reservation was completed', async () => {
+    for (const [status, fails] of [
+      ['confirmed', true],
+      ['completed', false],
+    ] as const) {
+      const { service, model } = setup(status, fails);
+      await expect(service.removeBlock(id, { start: '10:00', end: '11:00', cancelReservations: true })).rejects.toThrow(ConflictException);
+      expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+    }
+  });
+  it('requires explicit consent and supports the same cancellation for a full future day', async () => {
+    const { service, model, cancellation } = setup();
+    await expect(service.remove(id)).rejects.toThrow('confirmar');
+    expect(model.findByIdAndDelete).not.toHaveBeenCalled();
+    await service.remove(id, true);
+    expect(cancellation.update).toHaveBeenCalledTimes(1);
+    expect(model.findByIdAndDelete).toHaveBeenCalledTimes(1);
+  });
+});

@@ -15,7 +15,7 @@ describe('API calendar dates and canonical times', () => {
   const barberId = '507f1f77bcf86cd799439012';
   const appointmentId = '507f1f77bcf86cd799439013';
   const appointments = { create: jest.fn(), update: jest.fn(), getAvailableSlots: jest.fn() };
-  const schedules = { create: jest.fn(), update: jest.fn(), getAvailability: jest.fn(), findOne: jest.fn() };
+  const schedules = { removeBlock: jest.fn(), create: jest.fn(), update: jest.fn(), getAvailability: jest.fn(), findOne: jest.fn() };
   const validAppointment = { barberId, date: '2028-02-29', timeSlot: '09:00' };
   const validSchedule = { barberId, date: '2028-02-29', workingHours: [{ start: '09:00', end: '18:00' }], breakTimes: [{ start: '13:00', end: '14:00' }] };
 
@@ -44,6 +44,17 @@ describe('API calendar dates and canonical times', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     for (const method of [...Object.values(appointments), ...Object.values(schedules)]) method.mockResolvedValue({ ok: true });
+  });
+  it('requires a boolean cancellation consent and canonical block times', async () => {
+    for (const payload of [
+      { start: '10:00', end: '11:00', cancelReservations: 'true' },
+      { start: '25:00', end: '11:00', cancelReservations: true },
+    ]) {
+      await request(app.getHttpServer()).patch(`/barber-schedules/${appointmentId}/remove-block`).send(payload).expect(400);
+    }
+    expect(schedules.removeBlock).not.toHaveBeenCalled();
+    await request(app.getHttpServer()).patch(`/barber-schedules/${appointmentId}/remove-block`).send({ start: '10:00', end: '11:00', cancelReservations: true }).expect(200);
+    expect(schedules.removeBlock).toHaveBeenCalledWith(appointmentId, { start: '10:00', end: '11:00', cancelReservations: true });
   });
   afterAll(async () => {
     await app.close();
