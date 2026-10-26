@@ -80,6 +80,17 @@ export function validateEnv(config: EnvMap): EnvMap {
     throw new Error('JWT_SECRET cannot use insecure default value');
   }
 
+  const whatsappKeys = ['WHATSAPP_NOTIFY_PHONE', 'CALLMEBOT_API_KEY', 'WHATSAPP_ACTION_BASE_URL', 'WHATSAPP_ACTION_SECRET'];
+  if (['WHATSAPP_ACTION_BASE_URL', 'WHATSAPP_ACTION_SECRET'].some((key) => typeof config[key] === 'string' && String(config[key]).trim() !== '')) {
+    for (const key of whatsappKeys) getRequiredString(config, key);
+    if (!/^\+?[1-9]\d{7,14}$/.test(String(config.WHATSAPP_NOTIFY_PHONE))) throw new Error('WHATSAPP_NOTIFY_PHONE must include a valid country code');
+    if (config.WHATSAPP_ACTION_SECRET === jwtSecret) throw new Error('WHATSAPP_ACTION_SECRET must differ from JWT_SECRET');
+    if (String(config.WHATSAPP_ACTION_SECRET).length < 32) throw new Error('WHATSAPP_ACTION_SECRET must contain at least 32 characters');
+    const actionUrl = new URL(validateHttpUrl(String(config.WHATSAPP_ACTION_BASE_URL), 'WHATSAPP_ACTION_BASE_URL'));
+    if (actionUrl.username || actionUrl.password || actionUrl.search || actionUrl.hash || actionUrl.pathname !== '/') throw new Error('WHATSAPP_ACTION_BASE_URL must be the backend origin without a path, credentials, query or fragment');
+    if (actionUrl.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(actionUrl.hostname)) throw new Error('WHATSAPP_ACTION_BASE_URL requires HTTPS');
+  }
+
   return {
     ...config,
     MONGODB_URI: mongodbUri,

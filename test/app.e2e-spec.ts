@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { AppointmentCompletionService } from '../src/appointments/appointment-completion.service';
 import { AppModule } from './../src/app.module';
 
 describe('AppController (e2e)', () => {
@@ -10,7 +11,10 @@ describe('AppController (e2e)', () => {
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(AppointmentCompletionService)
+      .useValue({ onModuleInit: () => undefined, onModuleDestroy: () => undefined })
+      .compile();
 
     app = moduleFixture.createNestApplication();
     await app.init();

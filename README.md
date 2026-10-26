@@ -80,7 +80,7 @@ Notes:
 - Cancellation by administration also emails the client for past appointments; client cancellation still requires at least 12 hours of notice. The message identifies who cancelled.
 - `completed` appointments retain their `slotKey`; expired blocks cannot be booked again.
 - Email delivery failures are logged and never roll back appointment creation, confirmation, or cancellation.
-- `DELETE /appointments/:id` archives only cancelled or completed records, retaining status, history, archive date and administrator. It sends no email. The default list excludes archived records; administrators can use `GET /appointments?includeArchived=true` for client history.
+- `DELETE /appointments/:id` archives only cancelled, completed or no_show records, retaining status, history, archive date and administrator. It sends no email. The default list excludes archived records; administrators can use `GET /appointments?includeArchived=true` for client history.
 - Appointment expiration is evaluated in the `America/Santiago` timezone.
 
 ## Active reservation concurrency
@@ -341,7 +341,7 @@ Response: `Appointment`
 
 - Pending reservations can be confirmed or cancelled.
 - Confirmed reservations can be cancelled, or completed by administration from their start time onward (America/Santiago). Past confirmed reservations can therefore be closed manually.
-- Cancelled and completed reservations are final and cannot be edited or reactivated. There is no automatic completion.
+- Cancelled, completed and no_show reservations are final and cannot be edited or reactivated. Only confirmed reservations are completed automatically after 24 elapsed hours from their scheduled start in America/Santiago. Pending and cancelled reservations are never changed by this job.
 - Updates check the previously read state atomically. If another request changed it, the API returns 409 instead of overwriting the new state.
 - Completion keeps the occupied slot and removes the active-client key; cancellation releases the slot. Final records can be archived without physical deletion.
 
@@ -350,3 +350,23 @@ Response: `Appointment`
 `PATCH /barber-schedules/:id/remove-block` is admin-only and accepts `{ "start": "10:00", "end": "11:00" }`. With explicit cancellation consent it removes that exact future work interval while retaining the day, breaks, other intervals and reservation history. Overlapping pending or confirmed reservations require explicit `cancelReservations: true`; the usual admin cancellation flow sends the client email before removing the interval. Completed reservations prevent removal; cancelled records remain in history. Invalid or stale blocks return 400/409.
 
 Deleting a full future day also requires `?cancelReservations=true` if it contains pending or confirmed reservations. A past day or any work interval that has already started prevents full-day deletion. If cancellation fails, the schedule is not removed. Email transport failures retain the usual policy: logged without reversing the saved cancellation; delivery is not guaranteed.
+
+### WhatsApp: avisos y enlaces de aceptación/rechazo
+
+Integración opcional de CallMeBot para avisar a un número fijo al guardar una nueva reserva pendiente. Configurar juntas en el backend `WHATSAPP_NOTIFY_PHONE` (con código de país), `CALLMEBOT_API_KEY`, `WHATSAPP_ACTION_BASE_URL` (origen HTTPS público de la API, sin rutas) y `WHATSAPP_ACTION_SECRET` (secreto aleatorio de al menos 32 caracteres, independiente de JWT). Sin las cuatro variables, no se envían avisos. Configurar solo teléfono y clave mantiene la integración desactivada; al agregar URL o secreto de acciones se exige completar las cuatro. Nunca poner estas claves en Vite ni en el repositorio.
+
+El mensaje incluye dos enlaces firmados para `/appointments/actions/review?token=...`. El GET/HEAD solo muestra datos y un único botón para confirmar o rechazar y el resultado en texto, sin SweetAlert2; no cambia reservas. El POST acepta o rechaza reutilizando las transiciones y correos habituales. Cada token está ligado a una reserva, acción, fecha y hora, vence a las 24 horas o al comenzar la cita y deja de ser válido si la reserva cambia de horario o deja de estar pendiente. La actualización comprueba estado/horario también de forma atómica, evitando dobles acciones concurrentes. Quien posea el enlace puede realizar esa acción sin iniciar sesión: no reenviarlo. Cambiar el secreto invalida los enlaces emitidos.
+
+El envío a CallMeBot tiene timeout de 5 segundos; un fallo no revierte la reserva y se registra sin exponer claves ni enlaces. La aceptación del proveedor no garantiza entrega al teléfono. No hay reintentos automáticos ni envío a clientes. CallMeBot identifica su API gratuita como de uso personal; revisar sus condiciones antes de emplearla operativamente. La confirmación/rechazo conserva el correo al cliente; su entrega depende del servicio de correo existente.
+
+Desplegar este backend y configurar las variables antes de probar los enlaces desde WhatsApp. No requiere cambios en el frontend ni migración de datos.
+
+### Cierre automático a las 24 horas
+
+El backend revisa al arrancar y cada minuto las reservas confirmadas. Al cumplirse 24 horas reales desde el inicio de la cita (interpretado en America/Santiago), cambia únicamente `confirmed` a `completed`. Conserva la reserva y su `slotKey`, retira la clave de cliente activo y no envía correos ni WhatsApp por este cierre. Pendientes, canceladas y completadas no cambian. El estado y horario se vuelven a comprobar al escribir para respetar cambios concurrentes.
+
+La revisión requiere que el backend esté activo: si estuvo detenido, procesa las confirmadas vencidas al volver a arrancar. No necesita variables nuevas ni dependencias adicionales. En las pruebas de arranque se desactiva el proceso periódico; las pruebas de cierre usan únicamente colecciones temporales de QA.
+
+### No asistió
+
+Administración puede cambiar una reserva de `confirmed` a `no_show` (No asistió) desde la hora de inicio de la cita. Es un estado definitivo: no se reactiva, conserva el bloque e historial, retira la clave de cliente activo y puede archivarse como otros estados definitivos. No envía notificaciones adicionales. El cierre automático de 24 horas solo procesa `confirmed`, por lo que nunca convierte `no_show` a completada.

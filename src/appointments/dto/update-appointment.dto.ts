@@ -4,6 +4,6 @@ import { IsEnum, IsOptional } from 'class-validator';
 
 export class UpdateAppointmentDto extends PartialType(CreateAppointmentDto) {
   @IsOptional()
-  @IsEnum(['pending', 'confirmed', 'cancelled', 'completed'])
-  status?: 'pending' | 'confirmed' | 'cancelled' | 'completed';
+  @IsEnum(['pending', 'confirmed', 'cancelled', 'completed', 'no_show'])
+  status?: 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'no_show';
 }

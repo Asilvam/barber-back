@@ -121,7 +121,7 @@ export class BarberSchedulesService {
 
   private async cancelReservationsForRemoval(schedule: BarberSchedule, allowCancellation: boolean, block?: { start: string; end: string }) {
     const reservations = await this.appointmentModel
-      .find({ barberId: schedule.barberId, date: schedule.date, status: { $in: ['pending', 'confirmed', 'completed'] } })
+      .find({ barberId: schedule.barberId, date: schedule.date, status: { $in: ['pending', 'confirmed', 'completed', 'no_show'] } })
       .select('timeSlot status')
       .exec();
     const affected = reservations.filter((appointment) => {
@@ -129,8 +129,8 @@ export class BarberSchedulesService {
       const start = timeToMinutes(appointment.timeSlot);
       return start < timeToMinutes(block.end) && start + 60 > timeToMinutes(block.start);
     });
-    if (affected.some((appointment) => appointment.status === 'completed')) {
-      throw new ConflictException('El horario tiene una reserva completada y no se puede quitar.');
+    if (affected.some((appointment) => ['completed', 'no_show'].includes(appointment.status))) {
+      throw new ConflictException('El horario tiene una reserva completada o marcada como No asistió y no se puede quitar.');
     }
     if (affected.length && (!allowCancellation || !this.appointmentsService)) {
       throw new ConflictException('El bloque tiene una reserva. Debes cancelarla antes de quitarlo o confirmar su cancelación.');

@@ -20,6 +20,16 @@ describe('validateEnv', () => {
     expect(result.EMAIL_SERVICE_TIMEOUT_MS).toBe(5000);
   });
 
+  it('keeps WhatsApp optional, but rejects partial or unsafe action configuration', () => {
+    expect(() => validateEnv({ ...baseEnv, CALLMEBOT_API_KEY: 'fake', WHATSAPP_NOTIFY_PHONE: '56900000000' })).not.toThrow();
+    expect(() => validateEnv({ ...baseEnv, WHATSAPP_ACTION_BASE_URL: 'https://api.example.test' })).toThrow('WHATSAPP_NOTIFY_PHONE');
+    const whatsapp = { WHATSAPP_NOTIFY_PHONE: '56900000000', CALLMEBOT_API_KEY: 'fake', WHATSAPP_ACTION_BASE_URL: 'https://api.example.test', WHATSAPP_ACTION_SECRET: 'independent-action-test-secret-123456789' };
+    expect(() => validateEnv({ ...baseEnv, ...whatsapp })).not.toThrow();
+    for (const patch of [{ WHATSAPP_ACTION_SECRET: 'short' }, { WHATSAPP_ACTION_BASE_URL: 'http://api.example.test' }, { WHATSAPP_ACTION_BASE_URL: 'https://user:pass@api.example.test' }, { WHATSAPP_NOTIFY_PHONE: 'invalid' }]) {
+      expect(() => validateEnv({ ...baseEnv, ...whatsapp, ...patch })).toThrow();
+    }
+  });
+
   it('rejects insecure JWT secret default', () => {
     expect(() => validateEnv({ ...baseEnv, JWT_SECRET: 'change_me' })).toThrow('JWT_SECRET cannot use insecure default value');
   });

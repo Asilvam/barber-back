@@ -34,7 +34,7 @@ function queryResolved<T>(value: T) {
 }
 
 describe('AppointmentsService security', () => {
-  it.each(['cancelled', 'completed'])('archives %s without deleting the record or emailing', async (status) => {
+  it.each(['cancelled', 'completed', 'no_show'])('archives %s without deleting the record or emailing', async (status) => {
     const id = '507f1f77bcf86cd799439013';
     const admin = '507f1f77bcf86cd799439014';
     const current = { _id: id, status };
@@ -135,13 +135,13 @@ describe('AppointmentsService security', () => {
     const expiredFilter = service['getNonExpiredBarberAppointmentFilter']('507f1f77bcf86cd799439012', '2026-07-16', '10:00');
 
     expect(futureFilter).toMatchObject({
-      status: { $in: ['pending', 'confirmed', 'completed'] },
+      status: { $in: ['pending', 'confirmed', 'completed', 'no_show'] },
       date: '2026-07-23',
     });
     expect(futureFilter!.barberId.$in[0]).toBeInstanceOf(Types.ObjectId);
     expect(futureFilter!.barberId.$in[1]).toBe('507f1f77bcf86cd799439012');
     expect(todayFilter).toMatchObject({
-      status: { $in: ['pending', 'confirmed', 'completed'] },
+      status: { $in: ['pending', 'confirmed', 'completed', 'no_show'] },
       date: '2026-07-16',
       timeSlot: { $gte: '15:30' },
     });
@@ -450,6 +450,12 @@ describe('AppointmentsService security', () => {
   });
 
   it.each([
+    ['pending', 'no_show', 'admin', '2026-08-10T14:00:00Z', 'no está permitido'],
+    ['confirmed', 'no_show', 'admin', '2026-08-10T13:59:59Z', 'hora de inicio'],
+    ['confirmed', 'no_show', 'user', '2026-08-10T14:00:00Z', 'Solo administración'],
+    ['no_show', 'confirmed', 'admin', '2026-08-10T14:00:00Z', 'definitiva'],
+    ['no_show', 'cancelled', 'admin', '2026-08-10T14:00:00Z', 'definitiva'],
+    ['no_show', 'completed', 'admin', '2026-08-10T14:00:00Z', 'definitiva'],
     ['pending', 'completed', 'admin', '2026-08-10T14:00:00Z', 'no está permitido'],
     ['confirmed', 'completed', 'admin', '2026-08-10T13:59:59Z', 'hora de inicio'],
     ['confirmed', 'completed', 'user', '2026-08-10T14:00:00Z', 'Solo administración'],
@@ -483,6 +489,31 @@ describe('AppointmentsService security', () => {
     const current = { _id: new Types.ObjectId(id), clientId: new Types.ObjectId('507f1f77bcf86cd799439011'), barberId: new Types.ObjectId('507f1f77bcf86cd799439012'), date: '2026-08-10', timeSlot: '10:00', status: 'confirmed' };
     const model = { findById: jest.fn().mockReturnValue(queryResolved(current)), findOneAndUpdate: jest.fn().mockReturnValue(queryResolved(null)) };
     await expect(createService(model).update(id, { status: 'completed' }, 'admin')).rejects.toThrow('cambió de estado');
+  });
+
+  it('rejects combining No asistió with a reschedule', async () => {
+    const id = '507f1f77bcf86cd799439013';
+    const model = { findById: jest.fn().mockReturnValue(queryResolved({ status: 'confirmed', date: '2026-08-10', timeSlot: '10:00', barberId: new Types.ObjectId('507f1f77bcf86cd799439012') })), findOneAndUpdate: jest.fn() };
+    await expect(createService(model).update(id, { status: 'no_show', date: '2028-01-01' }, 'admin')).rejects.toThrow('No puedes cambiar');
+    expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('marks no_show at the start, keeps the occupied slot, releases the client key and sends no notifications', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-10T14:00:00Z'));
+    const id = '507f1f77bcf86cd799439013';
+    const barberId = '507f1f77bcf86cd799439012';
+    const current = { _id: new Types.ObjectId(id), clientId: new Types.ObjectId('507f1f77bcf86cd799439011'), barberId: new Types.ObjectId(barberId), date: '2026-08-10', timeSlot: '10:00', status: 'confirmed' };
+    const updated = { ...current, status: 'no_show' };
+    const model = { findById: jest.fn().mockReturnValue(queryResolved(current)), findOneAndUpdate: jest.fn().mockReturnValue(queryResolved(updated)) };
+    const email = { sendAppointmentConfirmedEmail: jest.fn(), sendAppointmentCancelledEmail: jest.fn() };
+    await expect(createService(model, {}, {}, {}, email).update(id, { status: 'no_show' }, 'admin')).resolves.toBe(updated);
+    expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: id, status: 'confirmed' },
+      { $set: { status: 'no_show', slotKey: `${barberId}:2026-08-10:10:00` }, $unset: { activeClientKey: 1 } },
+      { returnDocument: 'after', runValidators: true },
+    );
+    expect(email.sendAppointmentConfirmedEmail).not.toHaveBeenCalled();
+    expect(email.sendAppointmentCancelledEmail).not.toHaveBeenCalled();
   });
 
   it('keeps slotKey when an appointment is completed', async () => {

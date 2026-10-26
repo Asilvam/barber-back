@@ -20,7 +20,7 @@ describe('Removing one schedule block', () => {
     const { service, schedules, appointments } = setup();
     await service.removeBlock(id, block);
     expect(schedules.findOneAndUpdate).toHaveBeenCalledWith(expect.objectContaining({ workingHours: schedule.workingHours }), { $pull: { workingHours: block } }, { returnDocument: 'after', runValidators: true });
-    expect(appointments.find).toHaveBeenCalledWith({ barberId: schedule.barberId, date: schedule.date, status: { $in: ['pending', 'confirmed', 'completed'] } });
+    expect(appointments.find).toHaveBeenCalledWith({ barberId: schedule.barberId, date: schedule.date, status: { $in: ['pending', 'confirmed', 'completed', 'no_show'] } });
   });
   it.each(['09:30', '10:00', '10:30'])('rejects an overlapping reservation at %s', async (timeSlot) => {
     const { service, schedules } = setup(schedule, [{ timeSlot }]);

@@ -1,3 +1,6 @@
+import { WhatsappModule } from '../whatsapp/whatsapp.module';
+import { AppointmentActionsController } from './appointment-actions.controller';
+import { AppointmentCompletionService } from './appointment-completion.service';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose'; // Import MongooseModule
 import { AppointmentsService } from './appointments.service';
@@ -11,6 +14,7 @@ import { EmailModule } from '../email/email.module';
 @Module({
   imports: [
     EmailModule,
+    WhatsappModule,
     MongooseModule.forFeature([
       { name: Appointment.name, schema: AppointmentSchema },
       { name: Barber.name, schema: BarberSchema }, // Also register Barber schema as it's injected in AppointmentsService
@@ -18,8 +22,8 @@ import { EmailModule } from '../email/email.module';
       { name: User.name, schema: UserSchema }, // Register User schema
     ]),
   ],
-  controllers: [AppointmentsController],
-  providers: [AppointmentsService],
+  controllers: [AppointmentsController, AppointmentActionsController],
+  providers: [AppointmentsService, AppointmentCompletionService],
   exports: [AppointmentsService], // Export if other modules need to use AppointmentsService
 })
 export class AppointmentsModule {}

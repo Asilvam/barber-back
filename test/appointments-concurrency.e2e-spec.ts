@@ -1,3 +1,7 @@
+import { AppointmentCompletionService } from '../src/appointments/appointment-completion.service';
+import { ConfigService } from '@nestjs/config';
+import { AppointmentLinksService } from '../src/whatsapp/appointment-links.service';
+import { AppointmentActionsController } from '../src/appointments/appointment-actions.controller';
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import { ConflictException, Logger } from '@nestjs/common';
@@ -171,6 +175,79 @@ describe('Appointment concurrency against MongoDB', () => {
     expect(retained?.slotKey).toBeUndefined();
     expect(email.sendAppointmentCancelledEmail).toHaveBeenCalledTimes(1);
     expect(email.sendAppointmentCancelledEmail).toHaveBeenCalledWith(expect.objectContaining({ to: 'client@example.test', cancelledBy: 'admin' }));
+  });
+
+  it('notifies WhatsApp once only after a successful booking', async () => {
+    const whatsapp = { notifyAppointment: jest.fn().mockResolvedValue(undefined) };
+    service = new AppointmentsService(appointments, barbers, users, schedules, undefined, whatsapp as unknown as ConstructorParameters<typeof AppointmentsService>[5]);
+    const first = await book(client, '09:00');
+    expect(whatsapp.notifyAppointment).toHaveBeenCalledWith(expect.objectContaining({ id: first._id.toString(), date, timeSlot: '09:00' }));
+    await expect(book(client, '10:00')).rejects.toThrow('reserva activa');
+    expect(whatsapp.notifyAppointment).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows exactly one of competing accept/reject links and sends one matching email', async () => {
+    const first = await book(client, '09:00');
+    const email = { sendAppointmentConfirmedEmail: jest.fn().mockResolvedValue(undefined), sendAppointmentCancelledEmail: jest.fn().mockResolvedValue(undefined) };
+    const actionService = new AppointmentsService(appointments, barbers, users, schedules, email as unknown as ConstructorParameters<typeof AppointmentsService>[4]);
+    const links = new AppointmentLinksService(new ConfigService({ WHATSAPP_ACTION_SECRET: 'independent-action-test-secret-123456789' }));
+    const controller = new AppointmentActionsController(links, actionService);
+    const accept = links.create(first._id.toString(), 'accept', date, '09:00');
+    const reject = links.create(first._id.toString(), 'reject', date, '09:00');
+    const results = await Promise.allSettled([controller.execute({ token: accept }), controller.execute({ token: reject })]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    const saved = await appointments.findById(first._id).exec();
+    expect(['confirmed', 'cancelled']).toContain(saved?.status);
+    expect(email.sendAppointmentConfirmedEmail.mock.calls.length + email.sendAppointmentCancelledEmail.mock.calls.length).toBe(1);
+    await expect(controller.execute({ token: accept })).rejects.toThrow(ConflictException);
+    await expect(controller.execute({ token: reject })).rejects.toThrow(ConflictException);
+    expect(email.sendAppointmentConfirmedEmail.mock.calls.length + email.sendAppointmentCancelledEmail.mock.calls.length).toBe(1);
+  });
+
+  it('automatically completes only confirmed reservations at least 24 hours old, once', async () => {
+    const now = getSantiagoAppointmentTimestamp('2026-10-26', '12:00');
+    const data = [
+      { status: 'confirmed', timeSlot: '11:59', activeClientKey: client },
+      { status: 'confirmed', timeSlot: '12:00' },
+      { status: 'confirmed', timeSlot: '12:01' },
+      { status: 'pending', timeSlot: '09:00' },
+      { status: 'cancelled', timeSlot: '10:00' },
+      { status: 'completed', timeSlot: '11:00' },
+    ];
+    const records = await appointments.create(data.map((item) => ({ ...item, clientId: client, barberId: barber, date: '2026-10-25', ...(item.status !== 'cancelled' ? { slotKey: `${barber}:2026-10-25:${item.timeSlot}` } : {}) })));
+    const completion = new AppointmentCompletionService(appointments);
+    expect(await completion.completeOverdueConfirmed(now)).toBe(2);
+    expect(await completion.completeOverdueConfirmed(now)).toBe(0);
+    for (let index = 0; index < records.length; index++) {
+      const saved = await appointments.findById(records[index]._id).select('+activeClientKey').exec();
+      expect(saved?.status).toBe(index < 2 ? 'completed' : data[index].status);
+      if (index < 2) {
+        expect(saved?.activeClientKey).toBeUndefined();
+        expect(saved?.slotKey).toBe(records[index].slotKey);
+      }
+    }
+    expect(await appointments.countDocuments()).toBe(6);
+  });
+
+  it('retains no_show in client history and never auto-completes or reactivates it', async () => {
+    const first = await book(client, '09:00');
+    await service.update(first._id.toString(), { status: 'confirmed' }, 'admin');
+    const start = getSantiagoAppointmentTimestamp(date, '09:00');
+    jest.spyOn(Date, 'now').mockReturnValue(start);
+    await service.update(first._id.toString(), { status: 'no_show' }, 'admin');
+    const missed = await appointments.findById(first._id).select('+activeClientKey').exec();
+    expect(missed?.status).toBe('no_show');
+    expect(missed?.slotKey).toBe(first.slotKey);
+    expect(missed?.activeClientKey).toBeUndefined();
+    await new AppointmentCompletionService(appointments).completeOverdueConfirmed(start + 48 * 3600000);
+    expect((await appointments.findById(first._id).exec())?.status).toBe('no_show');
+    await expect(service.update(first._id.toString(), { status: 'completed' }, 'admin')).rejects.toThrow('definitiva');
+    await service.remove(first._id.toString(), admin);
+    const history = await service.findAll(true);
+    expect(history).toHaveLength(1);
+    expect(history[0].status).toBe('no_show');
+    expect(history[0].archivedAt).toBeDefined();
   });
 
   // Force both requests past the preflight read before either can insert.

@@ -33,7 +33,7 @@ export class Appointment {
   // Estado del flujo de la cita
   @Prop({
     required: true,
-    enum: ['pending', 'confirmed', 'cancelled', 'completed'],
+    enum: ['pending', 'confirmed', 'cancelled', 'completed', 'no_show'],
     default: 'pending',
   })
   status: string;

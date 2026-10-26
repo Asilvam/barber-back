@@ -1,3 +1,4 @@
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { ForbiddenException, Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common'; // Importar Logger
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
@@ -20,6 +21,7 @@ export class AppointmentsService {
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(BarberSchedule.name) private barberScheduleModel: Model<BarberSchedule>,
     private readonly emailService?: EmailService,
+    private readonly whatsappService?: WhatsappService,
   ) {}
 
   private isMongoDuplicateKeyError(error: unknown): boolean {
@@ -187,7 +189,7 @@ export class AppointmentsService {
 
     return {
       barberId: { $in: [new Types.ObjectId(barberId), barberId] },
-      status: { $in: ['pending', 'confirmed', 'completed'] },
+      status: { $in: ['pending', 'confirmed', 'completed', 'no_show'] },
       ...dateTimeFilter,
     };
   }
@@ -285,6 +287,7 @@ export class AppointmentsService {
     }
     this.logger.log(`Appointment ${savedAppointment._id.toString()} created successfully for client ${clientId} with barber ${barberId} on ${date} at ${timeSlot}.`);
     await this.notifyAppointmentCreated(client.email, client.name, barber.name, date, timeSlot);
+    await this.whatsappService?.notifyAppointment({ id: savedAppointment._id.toString(), clientName: client.name, barberName: barber.name, date, timeSlot });
     return savedAppointment;
   }
 
@@ -357,7 +360,7 @@ export class AppointmentsService {
     return appointment;
   }
 
-  async update(id: string, updateAppointmentDto: UpdateAppointmentDto, cancellationActor?: 'user' | 'admin'): Promise<AppointmentDocument> {
+  async update(id: string, updateAppointmentDto: UpdateAppointmentDto, cancellationActor?: 'user' | 'admin', pendingLink?: { date: string; timeSlot: string }): Promise<AppointmentDocument> {
     this.logger.log(`Attempting to update appointment ${id} with data: ${JSON.stringify(updateAppointmentDto)}`);
     if (!Types.ObjectId.isValid(id)) {
       this.logger.warn(`Invalid ID format: ${id} for update appointment.`);
@@ -371,6 +374,15 @@ export class AppointmentsService {
     }
     this.logger.debug(`Current appointment ${id} found for update.`);
 
+    if (
+      pendingLink &&
+      (currentAppointment.status !== 'pending' ||
+        currentAppointment.date !== pendingLink.date ||
+        currentAppointment.timeSlot !== pendingLink.timeSlot ||
+        getSantiagoAppointmentTimestamp(currentAppointment.date, currentAppointment.timeSlot) <= Date.now())
+    ) {
+      throw new ConflictException('La reserva ya fue gestionada, cambió de horario o ya comenzó. Revisa el panel.');
+    }
     if (currentAppointment.status === 'cancelled') {
       this.logger.warn(`Appointment ${id} is cancelled and cannot be modified.`);
       throw new ConflictException('Una reserva cancelada es definitiva y no puede modificarse.');
@@ -380,16 +392,26 @@ export class AppointmentsService {
       throw new ConflictException('Una reserva completada es definitiva y no puede modificarse.');
     }
 
+    if (currentAppointment.status === 'no_show') throw new ConflictException('Una reserva marcada como No asistió es definitiva y no puede modificarse.');
+
     const requestedStatus = updateAppointmentDto.status;
+    if (
+      requestedStatus === 'no_show' &&
+      ((updateAppointmentDto.date && updateAppointmentDto.date !== currentAppointment.date) ||
+        (updateAppointmentDto.timeSlot && updateAppointmentDto.timeSlot !== currentAppointment.timeSlot) ||
+        (updateAppointmentDto.barberId && updateAppointmentDto.barberId !== (currentAppointment.barberId as Types.ObjectId).toString()))
+    ) {
+      throw new BadRequestException('No puedes cambiar el horario o barbero al marcar No asistió.');
+    }
     if (requestedStatus && requestedStatus !== currentAppointment.status) {
-      const allowed = currentAppointment.status === 'pending' ? ['confirmed', 'cancelled'] : ['completed', 'cancelled'];
+      const allowed = currentAppointment.status === 'pending' ? ['confirmed', 'cancelled'] : ['completed', 'cancelled', 'no_show'];
       if (!allowed.includes(requestedStatus)) {
         throw new ConflictException('El cambio de estado solicitado no está permitido.');
       }
-      if (requestedStatus === 'completed') {
-        if (cancellationActor !== 'admin') throw new ForbiddenException('Solo administración puede completar una reserva.');
+      if (requestedStatus === 'completed' || requestedStatus === 'no_show') {
+        if (cancellationActor !== 'admin') throw new ForbiddenException('Solo administración puede completar o marcar No asistió.');
         const startsAt = getSantiagoAppointmentTimestamp(currentAppointment.date, currentAppointment.timeSlot);
-        if (Date.now() < startsAt) throw new ConflictException('Solo puedes completar la reserva desde su hora de inicio.');
+        if (Date.now() < startsAt) throw new ConflictException('Solo puedes completar o marcar No asistió desde la hora de inicio de la reserva.');
       }
     }
 
@@ -468,7 +490,10 @@ export class AppointmentsService {
 
     let updatedAppointment: AppointmentDocument | null;
     try {
-      const updateQuery = this.appointmentModel.findOneAndUpdate({ _id: id, status: currentAppointment.status }, persistenceUpdate, { returnDocument: 'after', runValidators: true });
+      const updateQuery = this.appointmentModel.findOneAndUpdate({ _id: id, status: currentAppointment.status, ...(pendingLink ? { date: pendingLink.date, timeSlot: pendingLink.timeSlot } : {}) }, persistenceUpdate, {
+        returnDocument: 'after',
+        runValidators: true,
+      });
       updatedAppointment = await updateQuery.populate('barberId').populate('clientId', '_id name email role provider emailVerified createdAt updatedAt').exec();
     } catch (error) {
       if (this.isActiveClientDuplicate(error)) throw this.activeClientConflict();
@@ -540,8 +565,8 @@ export class AppointmentsService {
     }
     const appointment = await this.appointmentModel.findById(id).exec();
     if (!appointment) throw new NotFoundException('La reserva no existe.');
-    if (!['cancelled', 'completed'].includes(appointment.status)) {
-      throw new ConflictException('Solo puedes archivar reservas canceladas o completadas.');
+    if (!['cancelled', 'completed', 'no_show'].includes(appointment.status)) {
+      throw new ConflictException('Solo puedes archivar reservas canceladas, completadas o marcadas como No asistió.');
     }
     const archived = await this.appointmentModel
       .findOneAndUpdate({ _id: id, status: appointment.status, archivedAt: { $exists: false } }, { $set: { archivedAt: new Date(), archivedBy: new Types.ObjectId(adminId) } }, { returnDocument: 'after', runValidators: true })
