@@ -250,6 +250,23 @@ describe('Appointment concurrency against MongoDB', () => {
     expect(history[0].archivedAt).toBeDefined();
   });
 
+  it('adds a block to the existing day, preserves reservations and prevents concurrent overlap', async () => {
+    const configured = await schedules.findOneAndUpdate({ barberId: barber, date }, { $set: { workingHours: [{ start: '09:00', end: '10:00' }], breakTimes: [{ start: '13:00', end: '14:00' }] } }, { returnDocument: 'after' }).exec();
+    const first = await book(client, '09:00');
+    const scheduleService = new BarberSchedulesService(schedules, barbers, appointments);
+    const results = await Promise.allSettled([scheduleService.addBlock(configured!._id.toString(), { start: '10:00', end: '12:00' }), scheduleService.addBlock(configured!._id.toString(), { start: '11:00', end: '13:00' })]);
+    expect(results.filter((item) => item.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((item) => item.status === 'rejected')).toHaveLength(1);
+    const saved = await schedules.findById(configured!._id).exec();
+    expect(saved?.workingHours).toHaveLength(2);
+    expect(saved?.breakTimes).toHaveLength(1);
+    expect((await appointments.findById(first._id).exec())?.status).toBe('pending');
+    expect(await schedules.countDocuments()).toBe(1);
+    const added = saved!.workingHours.find((range) => range.start !== '09:00')!;
+    await expect(book(otherClient, added.start)).resolves.toBeDefined();
+    await expect(scheduleService.addBlock(configured!._id.toString(), { start: '13:00', end: '14:00' })).rejects.toThrow('descanso');
+  });
+
   // Force both requests past the preflight read before either can insert.
   function synchronizeValidation() {
     const original = service['validateBarberAvailabilityForSlot'];

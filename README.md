@@ -370,3 +370,7 @@ La revisión requiere que el backend esté activo: si estuvo detenido, procesa l
 ### No asistió
 
 Administración puede cambiar una reserva de `confirmed` a `no_show` (No asistió) desde la hora de inicio de la cita. Es un estado definitivo: no se reactiva, conserva el bloque e historial, retira la clave de cliente activo y puede archivarse como otros estados definitivos. No envía notificaciones adicionales. El cierre automático de 24 horas solo procesa `confirmed`, por lo que nunca convierte `no_show` a completada.
+
+### Agregar un bloque a una jornada existente
+
+`PATCH /barber-schedules/:id/add-block` (solo administración) recibe `start` y `end` en HH:MM. Agrega el intervalo sin reemplazar la jornada, descansos ni reservas. Debe ser futuro, durar al menos 60 minutos dentro del mismo día y no cruzarse con bloques existentes ni descansos; permite intervalos contiguos. Se rechazan días libres, duplicados y cambios concurrentes de la agenda. No envía correos ni WhatsApp y no necesita migración.

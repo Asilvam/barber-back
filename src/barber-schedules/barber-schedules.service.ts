@@ -1,3 +1,4 @@
+import { AddScheduleBlockDto } from './dto/add-schedule-block.dto';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { getSantiagoAppointmentTimestamp, getSantiagoDateTime, timeToMinutes } from '../common/time/santiago-time';
 import { RemoveScheduleBlockDto } from './dto/remove-schedule-block.dto';
@@ -80,6 +81,28 @@ export class BarberSchedulesService {
       throw new NotFoundException(`Barber schedule with ID "${id}" not found.`);
     }
     return updatedSchedule;
+  }
+
+  async addBlock(id: string, block: AddScheduleBlockDto): Promise<BarberSchedule> {
+    if (!Types.ObjectId.isValid(id) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(block.start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(block.end) || timeToMinutes(block.end) - timeToMinutes(block.start) < 60) {
+      throw new BadRequestException('El bloque debe tener inicio y fin válidos y durar al menos 60 minutos dentro del mismo día.');
+    }
+    const schedule = await this.barberScheduleModel.findById(id).exec();
+    if (!schedule) throw new NotFoundException('La agenda del día no existe.');
+    if (schedule.isDayOff) throw new ConflictException('No puedes agregar bloques a un día libre.');
+    if (getSantiagoAppointmentTimestamp(schedule.date, block.start) <= Date.now()) throw new ConflictException('Solo puedes agregar bloques futuros.');
+    const overlaps = (range: { start: string; end: string }) => block.start < range.end && block.end > range.start;
+    if (schedule.workingHours.some(overlaps)) throw new ConflictException('El bloque se cruza con un horario existente.');
+    if (schedule.breakTimes.some(overlaps)) throw new ConflictException('El bloque se cruza con un descanso.');
+    const updated = await this.barberScheduleModel
+      .findOneAndUpdate(
+        { _id: id, date: schedule.date, isDayOff: false, workingHours: schedule.workingHours, breakTimes: schedule.breakTimes },
+        { $push: { workingHours: { $each: [{ start: block.start, end: block.end }], $sort: { start: 1, end: 1 } } } },
+        { returnDocument: 'after', runValidators: true },
+      )
+      .exec();
+    if (!updated) throw new ConflictException('La agenda cambió. Actualízala antes de agregar el bloque.');
+    return updated;
   }
 
   async removeBlock(id: string, block: RemoveScheduleBlockDto): Promise<BarberSchedule> {

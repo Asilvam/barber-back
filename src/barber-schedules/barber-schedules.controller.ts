@@ -1,3 +1,4 @@
+import { AddScheduleBlockDto } from './dto/add-schedule-block.dto';
 import { DefaultValuePipe, ParseBoolPipe, Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
 import { BarberSchedulesService } from './barber-schedules.service';
 import { CreateBarberScheduleDto } from './dto/create-barber-schedule.dto';
@@ -41,6 +42,14 @@ export class BarberSchedulesController {
   @ApiOperation({ summary: 'Obtener detalle de un horario de barbero por ID' })
   findOne(@Param('id') id: string) {
     return this.barberSchedulesService.findOne(id);
+  }
+
+  @Patch(':id/add-block')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Agregar un bloque futuro sin cruces a una jornada existente (Admin)' })
+  addBlock(@Param('id') id: string, @Body() block: AddScheduleBlockDto) {
+    return this.barberSchedulesService.addBlock(id, block);
   }
 
   @Patch(':id/remove-block')

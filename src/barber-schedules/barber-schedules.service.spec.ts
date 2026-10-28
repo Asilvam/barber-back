@@ -112,3 +112,57 @@ describe('Confirmed cancellation before removing a schedule', () => {
     expect(model.findByIdAndDelete).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Adding one schedule block', () => {
+  const id = '507f1f77bcf86cd799439013';
+  const block = { start: '11:00', end: '12:00' };
+  const schedule = { _id: id, date: '2028-01-01', isDayOff: false, workingHours: [{ start: '09:00', end: '11:00' }], breakTimes: [{ start: '13:00', end: '14:00' }] };
+  function setup(current: unknown = schedule, updated: unknown = schedule) {
+    const model = { findById: jest.fn().mockReturnValue(query(current)), findOneAndUpdate: jest.fn().mockReturnValue(query(updated)) };
+    return { service: new BarberSchedulesService(model as unknown as Dependencies[0], {} as Dependencies[1], {} as Dependencies[2]), model };
+  }
+  afterEach(() => jest.restoreAllMocks());
+  it('appends and sorts the new interval while preserving the rest of the day', async () => {
+    const { service, model } = setup();
+    await expect(service.addBlock(id, block)).resolves.toBe(schedule);
+    expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: id, date: schedule.date, isDayOff: false, workingHours: schedule.workingHours, breakTimes: schedule.breakTimes },
+      { $push: { workingHours: { $each: [block], $sort: { start: 1, end: 1 } } } },
+      { returnDocument: 'after', runValidators: true },
+    );
+  });
+  it.each([
+    { start: '09:00', end: '11:00' },
+    { start: '10:00', end: '12:00' },
+    { start: '08:00', end: '12:00' },
+  ])('rejects duplicated or overlapping work intervals %j', async (range) => {
+    const { service, model } = setup();
+    await expect(service.addBlock(id, range)).rejects.toThrow('horario existente');
+    expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+  it('rejects overlap with breaks and allows touching a break boundary', async () => {
+    await expect(setup().service.addBlock(id, { start: '12:00', end: '14:00' })).rejects.toThrow('descanso');
+    await expect(setup().service.addBlock(id, { start: '12:00', end: '13:00' })).resolves.toBe(schedule);
+    await expect(setup().service.addBlock(id, { start: '14:00', end: '15:00' })).resolves.toBe(schedule);
+  });
+  it.each([
+    { start: '11:00', end: '10:00' },
+    { start: '11:00', end: '11:30' },
+    { start: '25:00', end: '26:00' },
+    { start: '23:00', end: '00:00' },
+  ])('rejects invalid or too short intervals %j', async (range) => {
+    await expect(setup().service.addBlock(id, range)).rejects.toThrow('60 minutos');
+  });
+  it('rejects an invalid ID, a missing schedule and a day off', async () => {
+    await expect(setup().service.addBlock('bad', block)).rejects.toThrow('válidos');
+    await expect(setup(null).service.addBlock(id, block)).rejects.toThrow('no existe');
+    await expect(setup({ ...schedule, isDayOff: true }).service.addBlock(id, block)).rejects.toThrow('día libre');
+  });
+  it('rejects past blocks, including exactly at their start', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2028-01-01T14:00:00Z'));
+    await expect(setup().service.addBlock(id, block)).rejects.toThrow('futuros');
+  });
+  it('rejects a concurrent schedule or break change instead of overwriting it', async () => {
+    await expect(setup(schedule, null).service.addBlock(id, block)).rejects.toThrow('agenda cambió');
+  });
+});

@@ -15,7 +15,7 @@ describe('API calendar dates and canonical times', () => {
   const barberId = '507f1f77bcf86cd799439012';
   const appointmentId = '507f1f77bcf86cd799439013';
   const appointments = { create: jest.fn(), update: jest.fn(), getAvailableSlots: jest.fn() };
-  const schedules = { removeBlock: jest.fn(), create: jest.fn(), update: jest.fn(), getAvailability: jest.fn(), findOne: jest.fn() };
+  const schedules = { addBlock: jest.fn(), removeBlock: jest.fn(), create: jest.fn(), update: jest.fn(), getAvailability: jest.fn(), findOne: jest.fn() };
   const validAppointment = { barberId, date: '2028-02-29', timeSlot: '09:00' };
   const validSchedule = { barberId, date: '2028-02-29', workingHours: [{ start: '09:00', end: '18:00' }], breakTimes: [{ start: '13:00', end: '14:00' }] };
 
@@ -55,6 +55,14 @@ describe('API calendar dates and canonical times', () => {
     expect(schedules.removeBlock).not.toHaveBeenCalled();
     await request(app.getHttpServer()).patch(`/barber-schedules/${appointmentId}/remove-block`).send({ start: '10:00', end: '11:00', cancelReservations: true }).expect(200);
     expect(schedules.removeBlock).toHaveBeenCalledWith(appointmentId, { start: '10:00', end: '11:00', cancelReservations: true });
+  });
+  it('validates canonical times and rejects unrelated fields when adding a block', async () => {
+    for (const payload of [{ start: '25:00', end: '26:00' }, { start: '09:00' }, { start: '09:00', end: '10:00', isDayOff: false }]) {
+      await request(app.getHttpServer()).patch(`/barber-schedules/${appointmentId}/add-block`).send(payload).expect(400);
+    }
+    expect(schedules.addBlock).not.toHaveBeenCalled();
+    await request(app.getHttpServer()).patch(`/barber-schedules/${appointmentId}/add-block`).send({ start: '09:00', end: '10:00' }).expect(200);
+    expect(schedules.addBlock).toHaveBeenCalledWith(appointmentId, { start: '09:00', end: '10:00' });
   });
   afterAll(async () => {
     await app.close();
